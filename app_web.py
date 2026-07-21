@@ -237,19 +237,5 @@ else:
                             file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         )
-                        # Reemplazo exhaustivo de etiquetas en el Word
-for parrafo in doc.paragraphs:
-    for k, v in reemplazos.items():
-        if k in parrafo.text:
-            parrafo.text = parrafo.text.replace(k, str(v))
-    # Limpiar espacios dobles o tabulaciones raras dejadas por la plantilla
-    parrafo.text = re.sub(r'[ \t]{2,}', ' ', parrafo.text)
+                        
 
-for tabla in doc.tables:
-    for fila in tabla.rows:
-        for celda in fila.cells:
-            for parrafo in celda.paragraphs:
-                for k, v in reemplazos.items():
-                    if k in parrafo.text:
-                        parrafo.text = parrafo.text.replace(k, str(v))
-                parrafo.text = re.sub(r'[ \t]{2,}', ' ', parrafo.text)
