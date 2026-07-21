@@ -129,21 +129,27 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
 def reemplazar_etiquetas_seguras(doc, dic_reemplazos):
     """Reemplaza cada etiqueta respetando fuentes, firmas, pies de página e imágenes."""
     def procesar_parrafo(p):
+        texto_original = p.text
+        hay_cambio = False
         for k, v in dic_reemplazos.items():
-            if k in p.text:
-                # 1. Intentar reemplazo directo por run
-                reemplazado = False
-                for r in p.runs:
-                    if k in r.text:
-                        r.text = r.text.replace(k, str(v))
-                        reemplazado = True
-                
-                # 2. Si Word dividió la etiqueta en varios runs
-                if not reemplazado and len(p.runs) > 0:
-                    p.runs[0].text = p.text.replace(k, str(v))
-                    for r in p.runs[1:]:
-                        if 'graphic' not in r._element.xml and 'drawing' not in r._element.xml:
-                            r.text = ""
+            if k in texto_original:
+                hay_cambio = True
+                texto_original = texto_original.replace(k, str(v))
+        
+        if hay_cambio and len(p.runs) > 0:
+            p.runs[0].text = texto_original
+            for r in p.runs[1:]:
+                if 'graphic' not in r._element.xml and 'drawing' not in r._element.xml:
+                    r.text = ""
+
+    for p in doc.paragraphs:
+        procesar_parrafo(p)
+
+    for tabla in doc.tables:
+        for fila in tabla.rows:
+            for celda in fila.cells:
+                for p in celda.paragraphs:
+                    procesar_parrafo(p)
 
     # Reemplazar en todos los párrafos del documento
     for p in doc.paragraphs:
