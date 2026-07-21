@@ -125,34 +125,27 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def reemplazar_unicamente_etiquetas(doc, dic_reemplazos):
+def reemplazar_manteniendo_estructura(doc, dic_reemplazos):
     """
-    Reemplaza exclusivamente las etiquetas entre corchetes [ETIQUETA].
-    Omitirá cualquier párrafo o celda que contenga firmas, imágenes o texto fijo 
-    como los campos de VoBo, Revisó y Elaboró.
+    Sustituye etiquetas exactas sin alterar márgenes, saltos de página 
+    ni eliminar la firma manuscrita.
     """
     def procesar_parrafo(p):
-        # Si el párrafo no contiene ninguna etiqueta de reemplazo, no se toca en absoluto
-        if not any(k in p.text for k in dic_reemplazos.keys()):
-            return
-
-        # Reemplazar únicamente sobre los elementos de texto (runs) que contienen la etiqueta
         for k, v in dic_reemplazos.items():
             if k in p.text:
-                reemplazado = False
+                # Reemplazo seguro sobre los runs
                 for r in p.runs:
                     if k in r.text:
                         r.text = r.text.replace(k, str(v))
-                        reemplazado = True
                 
-                # Si Word rompió la etiqueta [ETIQUETA] en varios runs
-                if not reemplazado and len(p.runs) > 0:
-                    texto_nuevo = p.text.replace(k, str(v))
-                    p.runs[0].text = texto_nuevo
-                    for r in p.runs[1:]:
-                        # No borrar el run si tiene un objeto o dibujo (como la firma)
-                        xml_r = r._element.xml
-                        if not any(tag in xml_r for tag in ['w:drawing', 'w:pict', 'a:blip', 'v:shape']):
+                # En caso de que la etiqueta esté dividida en nodos XML de Word
+                if k in p.text:
+                    full_text = p.text.replace(k, str(v))
+                    # Mantiene las imágenes/firmas y asigna el texto al primer nodo
+                    runs_no_imagen = [r for r in p.runs if not any(img in r._element.xml for img in ['w:drawing', 'w:pict', 'a:blip', 'v:shape'])]
+                    if runs_no_imagen:
+                        runs_no_imagen[0].text = full_text
+                        for r in runs_no_imagen[1:]:
                             r.text = ""
 
     for p in doc.paragraphs:
@@ -181,7 +174,7 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando datos y conservando firmas intactas..."):
+            with st.spinner("Procesando datos en 1 sola hoja..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
@@ -236,13 +229,13 @@ else:
                         "[FECHA_HOY]": fecha_hoy_str
                     }
                     
-                    reemplazar_unicamente_etiquetas(doc, reemplazos)
+                    reemplazar_manteniendo_estructura(doc, reemplazos)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada manteniendo intactos los textos finales y firmas!")
+                    st.success(f"✅ ¡Resolución generada con éxito en 1 sola hoja!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
