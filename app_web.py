@@ -126,27 +126,37 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def reemplazar_xml_exacto(doc, dic_reemplazos):
-    """
-    Realiza un reemplazo a nivel de nodos XML del documento.
-    Garantiza conservar al 100% las fuentes, estilos, firmas e imágenes.
-    """
-    # 1. Reemplazar en todo el cuerpo del documento
-    for elemento in doc.element.body.iter():
-        if elemento.tag.endswith('t') and elemento.text:
-            for buscar, reemplazar in dic_reemplazos.items():
-                if buscar in elemento.text:
-                    elemento.text = elemento.text.replace(buscar, str(reemplazar))
+def reemplazar_etiqueta_respetando_formato(doc, dic_reemplazos):
+    """Reemplaza cada etiqueta conservando el tipo de letra, tamaño y firmas de la plantilla."""
+    def procesar_parrafo(p):
+        for k, v in dic_reemplazos.items():
+            if k in p.text:
+                # 1. Intentar reemplazo dentro de los runs directamente
+                reemplazado = False
+                for r in p.runs:
+                    if k in r.text:
+                        r.text = r.text.replace(k, str(v))
+                        reemplazado = True
+                
+                # 2. Si la etiqueta quedó partida entre varios runs en Word
+                if not reemplazado and len(p.runs) > 0:
+                    texto_actual = p.text
+                    texto_nuevo = texto_actual.replace(k, str(v))
+                    # Asignar texto completo al primer run para mantener la fuente original
+                    p.runs[0].text = texto_nuevo
+                    # Limpiar los runs sobrantes sin borrar imágenes/firmas
+                    for r in p.runs[1:]:
+                        if 'graphic' not in r._element.xml and 'drawing' not in r._element.xml:
+                            r.text = ""
 
-    # 2. Reemplazar en tablas
+    for p in doc.paragraphs:
+        procesar_parrafo(p)
+
     for tabla in doc.tables:
         for fila in tabla.rows:
             for celda in fila.cells:
-                for elemento in celda._element.iter():
-                    if elemento.tag.endswith('t') and elemento.text:
-                        for buscar, reemplazar in dic_reemplazos.items():
-                            if buscar in elemento.text:
-                                elemento.text = elemento.text.replace(buscar, str(reemplazar))
+                for p in celda.paragraphs:
+                    procesar_parrafo(p)
 
 # --- INTERFAZ STREAMLIT ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
@@ -165,13 +175,14 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando datos directamente sobre el XML original..."):
+            with st.spinner("Procesando funcionario y completando la plantilla genérica..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
                 nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
                 df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
 
+                # Buscar en Excel por cédula o por nombre
                 coincidencias = pd.DataFrame()
                 if datos_carta['cedula_extraida']:
                     coincidencias = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
@@ -206,7 +217,6 @@ else:
 
                     doc = Document(PLANTILLA_WORD)
                     
-                    # Mapa de reemplazos: busca etiquetas [ETIQUETA] o textos base sin romper el XML
                     reemplazos = {
                         "[NOMBRE_EMPLEADO]": nombre_completo,
                         "[CEDULA]": cedula_puntos,
@@ -215,29 +225,20 @@ else:
                         "[RADICADO]": datos_carta['radicado'],
                         "[FECHA_RADICADO]": datos_carta['fecha_radicado'],
                         "[FECHA_INICIO]": fecha_inicio_formateada,
+                        "FECHA_INICIO]": fecha_inicio_formateada,  # Cubre el pequeño error de tipeo en caso de que esté en la plantilla
                         "[FECHA_FIN]": fecha_fin_str,
                         "[PERIODO_INICIO]": datos_carta['periodo_inicio'],
                         "[PERIODO_FIN]": datos_carta['periodo_fin'],
-                        "[FECHA_HOY]": fecha_hoy_str,
-                        # Para plantillas con datos de ejemplo en lugar de etiquetas:
-                        "WILMAR AUGUSTO REINA ACERO": nombre_completo,
-                        "7.176.576": cedula_puntos,
-                        "15-1-2026-003231": datos_carta['radicado'],
-                        "04 de mayo de 2026": datos_carta['fecha_radicado'],
-                        "16 de junio de 2026": fecha_inicio_formateada,
-                        "07 de julio de 2026": fecha_fin_str,
-                        "01 de marzo de 2023": datos_carta['periodo_inicio'],
-                        "28 de febrero de 2024": datos_carta['periodo_fin']
+                        "[FECHA_HOY]": fecha_hoy_str
                     }
                     
-                    # Ejecutar reemplazo a nivel XML respetando estilos
-                    reemplazar_xml_exacto(doc, reemplazos)
+                    reemplazar_etiqueta_respetando_formato(doc, reemplazos)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada preservando 100% tu plantilla original para {nombre_completo}!")
+                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo}!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
