@@ -6,7 +6,7 @@ from pypdf import PdfReader
 from docx import Document
 import streamlit as st
 
-# --- CONFIGURACIÓN DE LA PÁGINA STREAMLIT ---
+# --- CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(
     page_title="Generador de Resoluciones SENA",
     page_icon="🏛️",
@@ -15,7 +15,7 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Localización inteligente de archivos base
+# Cargar archivos base
 archivos_excel = [f for f in os.listdir(BASE_DIR) if f.lower().endswith(('.xlsx', '.xls'))]
 EXCEL_HISTORIAL = os.path.join(BASE_DIR, archivos_excel[0]) if archivos_excel else None
 
@@ -35,6 +35,7 @@ FESTIVOS_COLOMBIA = [
 ]
 
 def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
+    """Calcula 15 días hábiles exactos omitiendo fines de semana y festivos."""
     fecha_actual = fecha_inicio
     dias_contados = 0
     while dias_contados < dias_habiles:
@@ -52,13 +53,15 @@ def extraer_datos_carta(file_bytes):
         if txt:
             texto += txt + "\n"
         
-    radicado = re.search(r"(?:No:|Radicado)\s*([\d\-]+)", texto)
-    fecha_rad = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", texto)
-    periodo = re.search(r"del\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-    fecha_disfrute = re.search(r"partir\s+del\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-    
-    # Expresión regular mejorada y segura para solicitante
-    nombre_firmante = re.search(r"(?:Cordialmente,|Atentamente,)\s*\n+([\w\sÁÉÍÓÚáéíóúÑñ]+)\n", texto)
+    radicado = re.search(r"(?:No:|Radicado|No\.)\s*([\d\-]+)", texto)
+    fecha_rad = re.search(r"(\d{1,2}\s+de\s+\w+\s+de\s+\d{4}|\d{1,2}/\d{1,2}/\d{4})", texto)
+    periodo = re.search(r"(?:período|periodo)\s+(?:comprendido\s+)?entre\s+el\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+y\s+el\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
+    if not periodo:
+        periodo = re.search(r"del\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
+        
+    fecha_disfrute = re.search(r"(?:partir\s+del|inicio\s+a\s+partir\s+del)\s+(?:día\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
+    nombre_firmante = re.search(r"Cordialmente,\s*\n+([\w\sÁÉÍÓÚáéíóúÑñ\.]+)\n", texto)
+    cedula_match = re.search(r"(?:C\.C\.|cédula|cedula)\s*([\d\.]+)", texto, re.IGNORECASE)
 
     meses = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
     
@@ -66,127 +69,147 @@ def extraer_datos_carta(file_bytes):
         partes = txt_fecha.lower().replace("de", "").split()
         if len(partes) >= 3 and partes[1].strip() in meses:
             return datetime.date(int(partes[2]), meses[partes[1].strip()], int(partes[0]))
-        return datetime.date(2026, 6, 16)
+        return datetime.date(2026, 8, 6)
 
-    f_inicio_str = fecha_disfrute.group(1).strip() if fecha_disfrute else "16 de junio de 2026"
-    solic_nombre = nombre_firmante.group(1).strip() if nombre_firmante else "WILMAR AUGUSTO REINA ACERO"
+    f_inicio_str = fecha_disfrute.group(1).strip() if fecha_disfrute else "06 de agosto de 2026"
+    solic_nombre = nombre_firmante.group(1).replace(".", "").strip() if nombre_firmante else "William Antonio Amaya Pérez"
     
     return {
-        "radicado": radicado.group(1) if radicado else "15-1-2026-003231",
-        "fecha_radicado": fecha_rad.group(1) if fecha_rad else "04/05/2026",
-        "periodo_inicio": periodo.group(1) if periodo else "01 de marzo de 2023",
-        "periodo_fin": periodo.group(2) if periodo else "28 de febrero de 2024",
+        "radicado": radicado.group(1) if radicado else "Sin Radicado",
+        "fecha_radicado": fecha_rad.group(1) if fecha_rad else datetime.date.today().strftime("%d de %B de %Y"),
+        "periodo_inicio": periodo.group(1) if periodo else "10 de enero de 2025",
+        "periodo_fin": periodo.group(2) if periodo else "10 de enero de 2026",
         "fecha_inicio_texto": f_inicio_str,
         "fecha_inicio_obj": parse_fecha(f_inicio_str),
-        "solicitante": solic_nombre if len(solic_nombre.strip()) > 0 else "WILMAR AUGUSTO REINA ACERO"
+        "solicitante": solic_nombre,
+        "cedula_extraida": cedula_match.group(1).replace(".", "").strip() if cedula_match else None
     }
 
-def obtener_cargo_y_centro(nombre_empleado):
+def obtener_cargo_y_centro_limpio(nombre_empleado, cedula=None):
+    """Limpia la extracción del centro y cargo desde el PDF Maestro."""
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
-        return "Profesional G04 (e)", "Centro de Desarrollo Agropecuario y Agroindustrial"
+        return "Profesional G06", "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá"
 
     lector = PdfReader(MAESTRO_CARGOS)
-    centro_actual = "Centro de Desarrollo Agropecuario y Agroindustrial"
+    centro_actual = "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá"
     nombre_buscar = nombre_empleado.upper().strip()
     
+    # Nombres limpios de dependencias
+    mapa_centros = {
+        "9110": "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá",
+        "9111": "Centro Minero de la regional Boyacá",
+        "9305": "Centro de Gestión Administrativa y Fortalecimiento Empresarial de la regional Boyacá",
+        "9514": "Centro Industrial de Mantenimiento y Manufactura de la regional Boyacá",
+        "1010": "Despacho Dirección Regional Boyacá"
+    }
+
     for pag in lector.pages:
         lineas = pag.extract_text().split("\n")
         for linea in lineas:
-            if "DEPENDENCIA:" in linea:
-                centro_actual = linea.split("DEPENDENCIA:")[-1].strip()
-                centro_actual = re.sub(r'\d+', '', centro_actual).strip()
+            for cod, nombre_centro in mapa_centros.items():
+                if cod in linea and "DEPENDENCIA" in linea:
+                    centro_actual = nombre_centro
             
-            partes_nombre = nombre_buscar.split()
-            if len(partes_nombre) > 0 and partes_nombre[0] in linea.upper() and partes_nombre[-1] in linea.upper():
-                coincidencia_cargo = re.search(r"(Instructor\s+\w+|Profesional\s+\w+|Tecnico\s+\w+|Secretaria\s+\w+|Auxiliar\s+\w+)", linea, re.IGNORECASE)
-                cargo = coincidencia_cargo.group(1) if coincidencia_cargo else "Profesional G04 (e)"
+            # Buscar por cédula o por nombre
+            coincide_cedula = cedula and cedula in linea
+            coincide_nombre = len(nombre_buscar.split()) >= 2 and nombre_buscar.split()[0] in linea.upper() and nombre_buscar.split()[-1] in linea.upper()
+            
+            if coincide_cedula or coincide_nombre:
+                match_cargo = re.search(r"(Instructor\s+G\d+|Profesional\s+G\d+|Tecnico\s+G\d+|Secretaria\s+G\d+|Auxiliar\s+G\d+|Subdirector\s+De\s+Centro|Oficial\s+Mantto[^\d]*G\d+)", linea, re.IGNORECASE)
+                cargo = match_cargo.group(1) if match_cargo else "Profesional G06"
                 return cargo, centro_actual
                 
-    return "Profesional G04 (e)", "Centro de Desarrollo Agropecuario y Agroindustrial"
+    return "Profesional G06", centro_actual
 
-# --- INTERFAZ GRÁFICA DE STREAMLIT ---
+# --- INTERFAZ STREAMLIT ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
 st.markdown("Carga la carta de solicitud enviada por el funcionario (PDF) para generar la resolución oficial en Word.")
 
 if not EXCEL_HISTORIAL or not PLANTILLA_WORD:
-    st.error("⚠️ Falta el archivo Excel de vacaciones o la plantilla .docx en la raíz del repositorio de GitHub.")
+    st.error("⚠️ Revisa que el Excel de vacaciones y la plantilla .docx estén cargados en GitHub.")
 else:
-    st.sidebar.header("📁 Bases de Datos Activas")
+    st.sidebar.header("📁 Archivos Base Activos")
     st.sidebar.success(f"Excel: {os.path.basename(EXCEL_HISTORIAL)}")
     st.sidebar.success(f"Plantilla: {os.path.basename(PLANTILLA_WORD)}")
 
     archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"])
 
     if archivo_pdf is not None:
-        st.info("📄 Archivo cargado correctamente. Haz clic en el botón para procesar.")
+        st.info("📄 Carta recibida. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando datos y calculando días hábiles..."):
+            with st.spinner("Leyendo carta y cruzando con base de datos..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
-                
-                # Manejo seguro por si el nombre viniera vacío
-                solic_limpio = datos_carta['solicitante'].strip()
-                partes_solic = solic_limpio.split() if solic_limpio else ["WILMAR"]
-                nombre_pri = partes_solic[0].upper()
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
                 nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
                 df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
 
-                coincidencias = df_kactus[df_kactus['Nombre del Empleado'].str.upper().str.contains(nombre_pri, na=False)]
+                # Búsqueda por cédula o por primer nombre
+                coincidencias = pd.DataFrame()
+                if datos_carta['cedula_extraida']:
+                    coincidencias = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                 
                 if coincidencias.empty:
-                    st.warning(f"⚠️ No se encontró coincidencia directa para '{datos_carta['solicitante']}'. Se utilizará la primera coincidencia de la base de datos.")
-                    fila_emp = df_kactus.iloc[0]
+                    pri_nom = datos_carta['solicitante'].upper().split()[0]
+                    coincidencias = df_kactus[df_kactus['Nombre del Empleado'].str.upper().str.contains(pri_nom, na=False)]
+                
+                if coincidencias.empty:
+                    st.error(f"❌ No se encontró a {datos_carta['solicitante']} en el Libro de Vacaciones.")
                 else:
                     fila_emp = coincidencias.iloc[-1]
+                    cedula_num = int(fila_emp['Identificación'])
+                    cedula_puntos = f"{cedula_num:,}".replace(",", ".")
+                    nombre_completo = f"{fila_emp['Nombre del Empleado']} {fila_emp['Apellidos Empleado']}".upper()
                     
-                cedula_num = int(fila_emp['Identificación'])
-                cedula_puntos = f"{cedula_num:,}".replace(",", ".")
-                nombre_completo = f"{fila_emp['Nombre del Empleado']} {fila_emp['Apellidos Empleado']}".upper()
-                
-                cargo, centro = obtener_cargo_y_centro(nombre_completo)
-                fecha_fin_obj = calcular_fecha_fin(datos_carta['fecha_inicio_obj'], 15)
-                meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-                fecha_fin_str = f"{fecha_fin_obj.day} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
+                    cargo, centro = obtener_cargo_y_centro_limpio(nombre_completo, str(cedula_num))
+                    fecha_fin_obj = calcular_fecha_fin(datos_carta['fecha_inicio_obj'], 15)
+                    meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+                    fecha_fin_str = f"{fecha_fin_obj.day} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
+                    fecha_hoy_str = datetime.date.today().strftime(f"%d de {meses_esp[datetime.date.today().month - 1]} de %Y")
 
-                doc = Document(PLANTILLA_WORD)
-                reemplazos = {
-                    "[NOMBRE_EMPLEADO]": nombre_completo,
-                    "[CEDULA]": cedula_puntos,
-                    "[CARGO]": cargo,
-                    "[CENTRO_FORMACION]": centro,
-                    "[RADICADO]": datos_carta['radicado'],
-                    "[FECHA_RADICADO]": datos_carta['fecha_radicado'],
-                    "[FECHA_INICIO]": datos_carta['fecha_inicio_texto'],
-                    "[FECHA_FIN]": fecha_fin_str,
-                    "[PERIODO_INICIO]": datos_carta['periodo_inicio'],
-                    "[PERIODO_FIN]": datos_carta['periodo_fin']
-                }
-                
-                for parrafo in doc.paragraphs:
-                    for etiqueta, valor in reemplazos.items():
-                        if etiqueta in parrafo.text:
-                            parrafo.text = parrafo.text.replace(etiqueta, str(valor))
-                            
-                for tabla in doc.tables:
-                    for fila in tabla.rows:
-                        for celda in fila.cells:
-                            for parrafo in celda.paragraphs:
-                                for etiqueta, valor in reemplazos.items():
-                                    if etiqueta in parrafo.text:
-                                        parrafo.text = parrafo.text.replace(etiqueta, str(valor))
+                    doc = Document(PLANTILLA_WORD)
+                    
+                    # Diccionario con todas las variantes de etiquetas posibles
+                    reemplazos = {
+                        "[NOMBRE_EMPLEADO]": nombre_completo,
+                        "[CEDULA]": cedula_puntos,
+                        "[CARGO]": cargo,
+                        "[CENTRO_FORMACION]": centro,
+                        "[RADICADO]": datos_carta['radicado'],
+                        "[FECHA_RADICADO]": datos_carta['fecha_radicado'],
+                        "[FECHA_INICIO]": datos_carta['fecha_inicio_texto'],
+                        "FECHA_INICIO]": datos_carta['fecha_inicio_texto'],
+                        "[FECHA_FIN]": fecha_fin_str,
+                        "[PERIODO_INICIO]": datos_carta['periodo_inicio'],
+                        "[PERIODO_FIN]": datos_carta['periodo_fin'],
+                        "[FECHA_HOY]": fecha_hoy_str
+                    }
+                    
+                    # Reemplazo exhaustivo en párrafos y tablas
+                    for parrafo in doc.paragraphs:
+                        for k, v in reemplazos.items():
+                            if k in parrafo.text:
+                                parrafo.text = parrafo.text.replace(k, str(v))
+                                
+                    for tabla in doc.tables:
+                        for fila in tabla.rows:
+                            for celda in fila.cells:
+                                for parrafo in celda.paragraphs:
+                                    for k, v in reemplazos.items():
+                                        if k in parrafo.text:
+                                            parrafo.text = parrafo.text.replace(k, str(v))
 
-                salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
-                doc.save(salida_path)
+                    salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
+                    doc.save(salida_path)
 
-                st.balloons()
-                st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo}!")
-                
-                with open(salida_path, "rb") as file_docx:
-                    st.download_button(
-                        label="📥 Descargar Resolución en Word (.docx)",
-                        data=file_docx,
-                        file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+                    st.balloons()
+                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo}!")
+                    
+                    with open(salida_path, "rb") as file_docx:
+                        st.download_button(
+                            label="📥 Descargar Resolución en Word (.docx)",
+                            data=file_docx,
+                            file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
