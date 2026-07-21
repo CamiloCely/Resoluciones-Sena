@@ -15,7 +15,7 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Carga de archivos base en el servidor
+# Localización inteligente de archivos en la raíz del repositorio
 archivos_excel = [f for f in os.listdir(BASE_DIR) if f.lower().endswith(('.xlsx', '.xls'))]
 EXCEL_HISTORIAL = os.path.join(BASE_DIR, archivos_excel[0]) if archivos_excel else None
 
@@ -35,7 +35,7 @@ FESTIVOS_COLOMBIA = [
 ]
 
 def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
-    """Calcula 15 días hábiles omitiendo festivos y fines de semana."""
+    """Calcula 15 días hábiles omitiendo festivos colombianos y fines de semana."""
     fecha_actual = fecha_inicio
     dias_contados = 0
     while dias_contados < dias_habiles:
@@ -126,32 +126,30 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def reemplazar_etiqueta_respetando_formato(doc, dic_reemplazos):
-    """Reemplaza cada etiqueta conservando el tipo de letra, tamaño y firmas de la plantilla."""
+def reemplazar_etiquetas_seguras(doc, dic_reemplazos):
+    """Reemplaza cada etiqueta respetando fuentes, firmas, pies de página e imágenes."""
     def procesar_parrafo(p):
         for k, v in dic_reemplazos.items():
             if k in p.text:
-                # 1. Intentar reemplazo dentro de los runs directamente
+                # 1. Intentar reemplazo directo por run
                 reemplazado = False
                 for r in p.runs:
                     if k in r.text:
                         r.text = r.text.replace(k, str(v))
                         reemplazado = True
                 
-                # 2. Si la etiqueta quedó partida entre varios runs en Word
+                # 2. Si Word dividió la etiqueta en varios runs
                 if not reemplazado and len(p.runs) > 0:
-                    texto_actual = p.text
-                    texto_nuevo = texto_actual.replace(k, str(v))
-                    # Asignar texto completo al primer run para mantener la fuente original
-                    p.runs[0].text = texto_nuevo
-                    # Limpiar los runs sobrantes sin borrar imágenes/firmas
+                    p.runs[0].text = p.text.replace(k, str(v))
                     for r in p.runs[1:]:
                         if 'graphic' not in r._element.xml and 'drawing' not in r._element.xml:
                             r.text = ""
 
+    # Reemplazar en todos los párrafos del documento
     for p in doc.paragraphs:
         procesar_parrafo(p)
 
+    # Reemplazar dentro de tablas
     for tabla in doc.tables:
         for fila in tabla.rows:
             for celda in fila.cells:
@@ -182,7 +180,7 @@ else:
                 nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
                 df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
 
-                # Buscar en Excel por cédula o por nombre
+                # Búsqueda en la base de datos por cédula o nombre
                 coincidencias = pd.DataFrame()
                 if datos_carta['cedula_extraida']:
                     coincidencias = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
@@ -217,6 +215,7 @@ else:
 
                     doc = Document(PLANTILLA_WORD)
                     
+                    # Mapa exhaustivo de reemplazos para tu plantilla genérica
                     reemplazos = {
                         "[NOMBRE_EMPLEADO]": nombre_completo,
                         "[CEDULA]": cedula_puntos,
@@ -225,14 +224,13 @@ else:
                         "[RADICADO]": datos_carta['radicado'],
                         "[FECHA_RADICADO]": datos_carta['fecha_radicado'],
                         "[FECHA_INICIO]": fecha_inicio_formateada,
-                        "FECHA_INICIO]": fecha_inicio_formateada,  # Cubre el pequeño error de tipeo en caso de que esté en la plantilla
                         "[FECHA_FIN]": fecha_fin_str,
                         "[PERIODO_INICIO]": datos_carta['periodo_inicio'],
                         "[PERIODO_FIN]": datos_carta['periodo_fin'],
                         "[FECHA_HOY]": fecha_hoy_str
                     }
                     
-                    reemplazar_etiqueta_respetando_formato(doc, reemplazos)
+                    reemplazar_etiquetas_seguras(doc, reemplazos)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
