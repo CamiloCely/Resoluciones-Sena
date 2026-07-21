@@ -15,7 +15,7 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Localización inteligente de archivos en la raíz del repositorio
+# Carga de archivos base
 archivos_excel = [f for f in os.listdir(BASE_DIR) if f.lower().endswith(('.xlsx', '.xls'))]
 EXCEL_HISTORIAL = os.path.join(BASE_DIR, archivos_excel[0]) if archivos_excel else None
 
@@ -35,7 +35,6 @@ FESTIVOS_COLOMBIA = [
 ]
 
 def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
-    """Calcula 15 días hábiles omitiendo festivos colombianos y fines de semana."""
     fecha_actual = fecha_inicio
     dias_contados = 0
     while dias_contados < dias_habiles:
@@ -126,36 +125,38 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def reemplazar_etiquetas_seguras(doc, dic_reemplazos):
-    """Reemplaza cada etiqueta respetando fuentes, firmas, pies de página e imágenes."""
+def reemplazar_sin_duplicar(doc, dic_reemplazos):
+    """
+    Reemplaza texto SIN duplicar párrafos, SIN borrar imágenes/firmas 
+    y manteniendo intacto el formato original.
+    """
     def procesar_parrafo(p):
-        texto_original = p.text
-        hay_cambio = False
-        for k, v in dic_reemplazos.items():
-            if k in texto_original:
-                hay_cambio = True
-                texto_original = texto_original.replace(k, str(v))
+        # 1. Hacer primero el reemplazo directo en cada run individual
+        for r in p.runs:
+            for k, v in dic_reemplazos.items():
+                if k in r.text:
+                    r.text = r.text.replace(k, str(v))
         
-        if hay_cambio and len(p.runs) > 0:
-            p.runs[0].text = texto_original
-            for r in p.runs[1:]:
-                if 'graphic' not in r._element.xml and 'drawing' not in r._element.xml:
-                    r.text = ""
+        # 2. Si Word dividió una etiqueta [ETIQUETA] en varios runs distintos
+        texto_p = p.text
+        for k, v in dic_reemplazos.items():
+            if k in texto_p:
+                # Reemplazar la etiqueta en el texto completo
+                texto_modificado = texto_p.replace(k, str(v))
+                # Limpiar todos los runs de texto puro (conservando imágenes/firmas)
+                runs_con_imagen = []
+                for r in p.runs:
+                    if 'graphic' in r._element.xml or 'drawing' in r._element.xml:
+                        runs_con_imagen.append(r)
+                    else:
+                        r.text = ""
+                # Colocar el texto corregido SOLO en el primer run
+                if len(p.runs) > 0:
+                    p.runs[0].text = texto_modificado
 
     for p in doc.paragraphs:
         procesar_parrafo(p)
 
-    for tabla in doc.tables:
-        for fila in tabla.rows:
-            for celda in fila.cells:
-                for p in celda.paragraphs:
-                    procesar_parrafo(p)
-
-    # Reemplazar en todos los párrafos del documento
-    for p in doc.paragraphs:
-        procesar_parrafo(p)
-
-    # Reemplazar dentro de tablas
     for tabla in doc.tables:
         for fila in tabla.rows:
             for celda in fila.cells:
@@ -179,14 +180,13 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando funcionario y completando la plantilla genérica..."):
+            with st.spinner("Procesando funcionario sin duplicar párrafos..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
                 nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
                 df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
 
-                # Búsqueda en la base de datos por cédula o nombre
                 coincidencias = pd.DataFrame()
                 if datos_carta['cedula_extraida']:
                     coincidencias = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
@@ -221,7 +221,6 @@ else:
 
                     doc = Document(PLANTILLA_WORD)
                     
-                    # Mapa exhaustivo de reemplazos para tu plantilla genérica
                     reemplazos = {
                         "[NOMBRE_EMPLEADO]": nombre_completo,
                         "[CEDULA]": cedula_puntos,
@@ -236,13 +235,13 @@ else:
                         "[FECHA_HOY]": fecha_hoy_str
                     }
                     
-                    reemplazar_etiquetas_seguras(doc, reemplazos)
+                    reemplazar_sin_duplicar(doc, reemplazos)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo}!")
+                    st.success(f"✅ ¡Resolución oficial generada de forma limpia para {nombre_completo}!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
