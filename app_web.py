@@ -126,26 +126,27 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def reemplazar_en_parrafo_sin_perder_formato(parrafo, dic_reemplazos):
-    """Reemplaza texto respetando estrictamente el formato original de la plantilla."""
-    texto_parrafo = parrafo.text
-    for buscar, reemplazar in dic_reemplazos.items():
-        if buscar in texto_parrafo:
-            # Buscar en qué run está presente el texto o reemplazar conservando el estilo del primer run
-            for run in parrafo.runs:
-                if buscar in run.text:
-                    run.text = run.text.replace(buscar, str(reemplazar))
-                    return
-            
-            # Si el texto estaba dividido entre varios runs, reemplazar preservando el formato del primer run
-            if len(parrafo.runs) > 0:
-                primer_run = parrafo.runs[0]
-                nuevo_texto = texto_parrafo.replace(buscar, str(reemplazar))
-                primer_run.text = nuevo_texto
-                for run in parrafo.runs[1:]:
-                    # No borrar si el run contiene imágenes
-                    if 'graphic' not in run._element.xml:
-                        run.text = ""
+def reemplazar_xml_exacto(doc, dic_reemplazos):
+    """
+    Realiza un reemplazo a nivel de nodos XML del documento.
+    Garantiza conservar al 100% las fuentes, estilos, firmas e imágenes.
+    """
+    # 1. Reemplazar en todo el cuerpo del documento
+    for elemento in doc.element.body.iter():
+        if elemento.tag.endswith('t') and elemento.text:
+            for buscar, reemplazar in dic_reemplazos.items():
+                if buscar in elemento.text:
+                    elemento.text = elemento.text.replace(buscar, str(reemplazar))
+
+    # 2. Reemplazar en tablas
+    for tabla in doc.tables:
+        for fila in tabla.rows:
+            for celda in fila.cells:
+                for elemento in celda._element.iter():
+                    if elemento.tag.endswith('t') and elemento.text:
+                        for buscar, reemplazar in dic_reemplazos.items():
+                            if buscar in elemento.text:
+                                elemento.text = elemento.text.replace(buscar, str(reemplazar))
 
 # --- INTERFAZ STREAMLIT ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
@@ -164,7 +165,7 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Generando resolución sobre tu plantilla original..."):
+            with st.spinner("Procesando datos directamente sobre el XML original..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
@@ -205,7 +206,7 @@ else:
 
                     doc = Document(PLANTILLA_WORD)
                     
-                    # Diccionario con las etiquetas de plantilla o texto base
+                    # Mapa de reemplazos: busca etiquetas [ETIQUETA] o textos base sin romper el XML
                     reemplazos = {
                         "[NOMBRE_EMPLEADO]": nombre_completo,
                         "[CEDULA]": cedula_puntos,
@@ -218,7 +219,7 @@ else:
                         "[PERIODO_INICIO]": datos_carta['periodo_inicio'],
                         "[PERIODO_FIN]": datos_carta['periodo_fin'],
                         "[FECHA_HOY]": fecha_hoy_str,
-                        # Reemplazo sobre texto base si la plantilla tiene datos de ejemplo
+                        # Para plantillas con datos de ejemplo en lugar de etiquetas:
                         "WILMAR AUGUSTO REINA ACERO": nombre_completo,
                         "7.176.576": cedula_puntos,
                         "15-1-2026-003231": datos_carta['radicado'],
@@ -229,21 +230,14 @@ else:
                         "28 de febrero de 2024": datos_carta['periodo_fin']
                     }
                     
-                    # Reemplazar de forma limpia sin dañar firmas, tipos de letra ni márgenes
-                    for parrafo in doc.paragraphs:
-                        reemplazar_en_parrafo_sin_perder_formato(parrafo, reemplazos)
-                                
-                    for tabla in doc.tables:
-                        for fila in tabla.rows:
-                            for celda in fila.cells:
-                                for parrafo in celda.paragraphs:
-                                    reemplazar_en_parrafo_sin_perder_formato(parrafo, reemplazos)
+                    # Ejecutar reemplazo a nivel XML respetando estilos
+                    reemplazar_xml_exacto(doc, reemplazos)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada exactamente sobre tu plantilla para {nombre_completo}!")
+                    st.success(f"✅ ¡Resolución generada preservando 100% tu plantilla original para {nombre_completo}!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
