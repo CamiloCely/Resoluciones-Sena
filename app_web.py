@@ -125,36 +125,32 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def reemplazar_etiquetas_protegiendo_firmas(doc, dic_reemplazos):
-    """Reemplaza únicamente las etiquetas de texto ignorando por completo imágenes y firmas."""
-    def procesar_parrafo(p):
-        # Si el párrafo contiene un dibujo o imagen (como la firma), no se toca
-        xml_p = p._element.xml
-        if 'w:drawing' in xml_p or 'w:pict' in xml_p or 'graphic' in xml_p:
-            # Reemplazar de forma súper segura en las ejecuciones que no sean imagen
-            for r in p.runs:
-                if 'w:drawing' not in r._element.xml and 'w:pict' not in r._element.xml:
-                    for k, v in dic_reemplazos.items():
-                        if k in r.text:
-                            r.text = r.text.replace(k, str(v))
-            return
+def es_run_con_imagen(run):
+    """Verifica si un run específico contiene una imagen o firma."""
+    xml_run = run._element.xml
+    etiquetas_imagen = ['w:drawing', 'w:pict', 'a:blip', 'v:imagedata', 'v:shape']
+    return any(etiqueta in xml_run for etiqueta in etiquetas_imagen)
 
-        # Para los demás párrafos de texto normal
+def reemplazar_etiquetas_protegiendo_firmas(doc, dic_reemplazos):
+    """Reemplaza únicamente las etiquetas de texto protegiendo 100% la imagen de la firma."""
+    def procesar_parrafo(p):
         for k, v in dic_reemplazos.items():
             if k in p.text:
-                # 1. Reemplazo directo en cada run
+                # 1. Intentar reemplazo directo por run
                 reemplazado = False
                 for r in p.runs:
                     if k in r.text:
                         r.text = r.text.replace(k, str(v))
                         reemplazado = True
                 
-                # 2. Si Word cortó la etiqueta entre varios runs
+                # 2. Si Word fragmentó la etiqueta entre varios runs
                 if not reemplazado and len(p.runs) > 0:
                     texto_actual = p.text
                     p.runs[0].text = texto_actual.replace(k, str(v))
                     for r in p.runs[1:]:
-                        r.text = ""
+                        # NUNCA vaciar un run si contiene una imagen o la firma
+                        if not es_run_con_imagen(r):
+                            r.text = ""
 
     for p in doc.paragraphs:
         procesar_parrafo(p)
