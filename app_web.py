@@ -58,7 +58,6 @@ def extraer_datos_carta(file_bytes):
     radicado = re.search(r"(?:No:|Radicado|No\.)\s*([\d\-]+)", texto)
     fecha_rad = re.search(r"(\d{1,2}\s+de\s+\w+\s+de\s+\d{4}|\d{1,2}/\d{1,2}/\d{4})", texto)
     
-    # Intenta capturar formatos de período: "del 01 de marzo de 2023 al 28 de febrero de 2024" o "entre el 10... y el 10..."
     periodo = re.search(r"(?:período|periodo)\s+(?:comprendido\s+)?entre\s+el\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+y\s+el\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
     if not periodo:
         periodo = re.search(r"del\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
@@ -90,7 +89,7 @@ def extraer_datos_carta(file_bytes):
     }
 
 def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
-    """Extrae el cargo y asigna el Centro de Formación con nombre oficial limpio (sin símbolos // ni basura)."""
+    """Extrae el cargo y asigna el Centro de Formación con nombre oficial limpio."""
     centro_oficial = "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá"
     cargo_oficial = "Profesional G04 (e)"
 
@@ -100,7 +99,6 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
     lector = PdfReader(MAESTRO_CARGOS)
     nombre_buscar = nombre_empleado.upper().strip()
     
-    # Mapeo de códigos de dependencia a nombres limpios oficializados
     NOMBRES_CENTROS_LIMPIOS = {
         "9110": "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá",
         "9111": "Centro Minero de la regional Boyacá",
@@ -175,12 +173,10 @@ else:
                     
                     cargo, centro = obtener_cargo_y_centro_oficial(nombre_completo, str(cedula_num))
                     
-                    # Formatear fechas en español
                     meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
                     
                     fecha_fin_obj = calcular_fecha_fin(datos_carta['fecha_inicio_obj'], 15)
                     
-                    # Formato con cero a la izquierda para días menores a 10 (ej: "07 de julio de 2026")
                     dia_fin_str = f"{fecha_fin_obj.day:02d}" if fecha_fin_obj.day < 10 else f"{fecha_fin_obj.day}"
                     fecha_fin_str = f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
                     
@@ -193,7 +189,6 @@ else:
 
                     doc = Document(PLANTILLA_WORD)
                     
-                    # Mapeo exhaustivo para reemplazar todas las etiquetas en la plantilla
                     reemplazos = {
                         "[NOMBRE_EMPLEADO]": nombre_completo,
                         "[CEDULA]": cedula_puntos,
@@ -209,13 +204,13 @@ else:
                         "[FECHA_HOY]": fecha_hoy_str
                     }
                     
-                    # Reemplazar en párrafos
+                    # AQUÍ VA LA ELIMINACIÓN AUTOMÁTICA DE ESPACIOS DOBLES Y TABULACIONES
                     for parrafo in doc.paragraphs:
                         for k, v in reemplazos.items():
                             if k in parrafo.text:
                                 parrafo.text = parrafo.text.replace(k, str(v))
+                        parrafo.text = re.sub(r'[ \t]{2,}', ' ', parrafo.text)
                                 
-                    # Reemplazar en tablas
                     for tabla in doc.tables:
                         for fila in tabla.rows:
                             for celda in fila.cells:
@@ -223,6 +218,7 @@ else:
                                     for k, v in reemplazos.items():
                                         if k in parrafo.text:
                                             parrafo.text = parrafo.text.replace(k, str(v))
+                                    parrafo.text = re.sub(r'[ \t]{2,}', ' ', parrafo.text)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
