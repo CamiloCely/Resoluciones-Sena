@@ -4,6 +4,7 @@ import datetime
 import pandas as pd
 from pypdf import PdfReader
 from docx import Document
+from docx.shared import Cm, Pt
 import streamlit as st
 
 # --- CONFIGURACIÓN DE PÁGINA ---
@@ -125,23 +126,32 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def reemplazar_manteniendo_estructura(doc, dic_reemplazos):
+def forzar_formato_una_hoja(doc, dic_reemplazos):
     """
-    Sustituye etiquetas exactas sin alterar márgenes, saltos de página 
-    ni eliminar la firma manuscrita.
+    1. Ajusta márgenes gigantes a 2 cm.
+    2. Reemplaza etiquetas.
+    3. Normaliza espaciado para asegurar estricta dimensión de 1 HOJA.
     """
+    # Fix de Márgenes (de 5.3 cm pasa a 2.2 cm)
+    for section in doc.sections:
+        section.top_margin = Cm(2.2)
+        section.bottom_margin = Cm(2.0)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
+
     def procesar_parrafo(p):
+        # Normalizar espaciado de párrafos para compactar espacio
+        p.paragraph_format.space_before = Pt(2)
+        p.paragraph_format.space_after = Pt(2)
+
         for k, v in dic_reemplazos.items():
             if k in p.text:
-                # Reemplazo seguro sobre los runs
                 for r in p.runs:
                     if k in r.text:
                         r.text = r.text.replace(k, str(v))
                 
-                # En caso de que la etiqueta esté dividida en nodos XML de Word
                 if k in p.text:
                     full_text = p.text.replace(k, str(v))
-                    # Mantiene las imágenes/firmas y asigna el texto al primer nodo
                     runs_no_imagen = [r for r in p.runs if not any(img in r._element.xml for img in ['w:drawing', 'w:pict', 'a:blip', 'v:shape'])]
                     if runs_no_imagen:
                         runs_no_imagen[0].text = full_text
@@ -174,7 +184,7 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando datos en 1 sola hoja..."):
+            with st.spinner("Procesando datos y forzando documento a 1 sola hoja..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
@@ -229,13 +239,13 @@ else:
                         "[FECHA_HOY]": fecha_hoy_str
                     }
                     
-                    reemplazar_manteniendo_estructura(doc, reemplazos)
+                    forzar_formato_una_hoja(doc, reemplazos)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada con éxito en 1 sola hoja!")
+                    st.success(f"✅ ¡Resolución ajustada exitosamente en 1 sola hoja!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
