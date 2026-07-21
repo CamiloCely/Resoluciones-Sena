@@ -125,31 +125,34 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def es_run_con_imagen(run):
-    """Verifica si un run específico contiene una imagen o firma."""
-    xml_run = run._element.xml
-    etiquetas_imagen = ['w:drawing', 'w:pict', 'a:blip', 'v:imagedata', 'v:shape']
-    return any(etiqueta in xml_run for etiqueta in etiquetas_imagen)
-
-def reemplazar_etiquetas_protegiendo_firmas(doc, dic_reemplazos):
-    """Reemplaza únicamente las etiquetas de texto protegiendo 100% la imagen de la firma."""
+def reemplazar_unicamente_etiquetas(doc, dic_reemplazos):
+    """
+    Reemplaza exclusivamente las etiquetas entre corchetes [ETIQUETA].
+    Omitirá cualquier párrafo o celda que contenga firmas, imágenes o texto fijo 
+    como los campos de VoBo, Revisó y Elaboró.
+    """
     def procesar_parrafo(p):
+        # Si el párrafo no contiene ninguna etiqueta de reemplazo, no se toca en absoluto
+        if not any(k in p.text for k in dic_reemplazos.keys()):
+            return
+
+        # Reemplazar únicamente sobre los elementos de texto (runs) que contienen la etiqueta
         for k, v in dic_reemplazos.items():
             if k in p.text:
-                # 1. Intentar reemplazo directo por run
                 reemplazado = False
                 for r in p.runs:
                     if k in r.text:
                         r.text = r.text.replace(k, str(v))
                         reemplazado = True
                 
-                # 2. Si Word fragmentó la etiqueta entre varios runs
+                # Si Word rompió la etiqueta [ETIQUETA] en varios runs
                 if not reemplazado and len(p.runs) > 0:
-                    texto_actual = p.text
-                    p.runs[0].text = texto_actual.replace(k, str(v))
+                    texto_nuevo = p.text.replace(k, str(v))
+                    p.runs[0].text = texto_nuevo
                     for r in p.runs[1:]:
-                        # NUNCA vaciar un run si contiene una imagen o la firma
-                        if not es_run_con_imagen(r):
+                        # No borrar el run si tiene un objeto o dibujo (como la firma)
+                        xml_r = r._element.xml
+                        if not any(tag in xml_r for tag in ['w:drawing', 'w:pict', 'a:blip', 'v:shape']):
                             r.text = ""
 
     for p in doc.paragraphs:
@@ -178,7 +181,7 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando datos y conservando firma manuscrita..."):
+            with st.spinner("Procesando datos y conservando firmas intactas..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
@@ -233,13 +236,13 @@ else:
                         "[FECHA_HOY]": fecha_hoy_str
                     }
                     
-                    reemplazar_etiquetas_protegiendo_firmas(doc, reemplazos)
+                    reemplazar_unicamente_etiquetas(doc, reemplazos)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada con éxito manteniendo la firma manuscrita!")
+                    st.success(f"✅ ¡Resolución generada manteniendo intactos los textos finales y firmas!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
