@@ -125,34 +125,36 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 
     return cargo_oficial, centro_oficial
 
-def reemplazar_sin_duplicar(doc, dic_reemplazos):
-    """
-    Reemplaza texto SIN duplicar párrafos, SIN borrar imágenes/firmas 
-    y manteniendo intacto el formato original.
-    """
+def reemplazar_etiquetas_protegiendo_firmas(doc, dic_reemplazos):
+    """Reemplaza únicamente las etiquetas de texto ignorando por completo imágenes y firmas."""
     def procesar_parrafo(p):
-        # 1. Hacer primero el reemplazo directo en cada run individual
-        for r in p.runs:
-            for k, v in dic_reemplazos.items():
-                if k in r.text:
-                    r.text = r.text.replace(k, str(v))
-        
-        # 2. Si Word dividió una etiqueta [ETIQUETA] en varios runs distintos
-        texto_p = p.text
+        # Si el párrafo contiene un dibujo o imagen (como la firma), no se toca
+        xml_p = p._element.xml
+        if 'w:drawing' in xml_p or 'w:pict' in xml_p or 'graphic' in xml_p:
+            # Reemplazar de forma súper segura en las ejecuciones que no sean imagen
+            for r in p.runs:
+                if 'w:drawing' not in r._element.xml and 'w:pict' not in r._element.xml:
+                    for k, v in dic_reemplazos.items():
+                        if k in r.text:
+                            r.text = r.text.replace(k, str(v))
+            return
+
+        # Para los demás párrafos de texto normal
         for k, v in dic_reemplazos.items():
-            if k in texto_p:
-                # Reemplazar la etiqueta en el texto completo
-                texto_modificado = texto_p.replace(k, str(v))
-                # Limpiar todos los runs de texto puro (conservando imágenes/firmas)
-                runs_con_imagen = []
+            if k in p.text:
+                # 1. Reemplazo directo en cada run
+                reemplazado = False
                 for r in p.runs:
-                    if 'graphic' in r._element.xml or 'drawing' in r._element.xml:
-                        runs_con_imagen.append(r)
-                    else:
+                    if k in r.text:
+                        r.text = r.text.replace(k, str(v))
+                        reemplazado = True
+                
+                # 2. Si Word cortó la etiqueta entre varios runs
+                if not reemplazado and len(p.runs) > 0:
+                    texto_actual = p.text
+                    p.runs[0].text = texto_actual.replace(k, str(v))
+                    for r in p.runs[1:]:
                         r.text = ""
-                # Colocar el texto corregido SOLO en el primer run
-                if len(p.runs) > 0:
-                    p.runs[0].text = texto_modificado
 
     for p in doc.paragraphs:
         procesar_parrafo(p)
@@ -180,7 +182,7 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando funcionario sin duplicar párrafos..."):
+            with st.spinner("Procesando datos y conservando firma manuscrita..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
@@ -235,13 +237,13 @@ else:
                         "[FECHA_HOY]": fecha_hoy_str
                     }
                     
-                    reemplazar_sin_duplicar(doc, reemplazos)
+                    reemplazar_etiquetas_protegiendo_firmas(doc, reemplazos)
 
                     salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución oficial generada de forma limpia para {nombre_completo}!")
+                    st.success(f"✅ ¡Resolución generada con éxito manteniendo la firma manuscrita!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
