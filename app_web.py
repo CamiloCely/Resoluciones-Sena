@@ -60,8 +60,6 @@ def extraer_datos_carta(file_bytes):
         periodo = re.search(r"del\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
         
     fecha_disfrute = re.search(r"(?:partir\s+del|inicio\s+a\s+partir\s+del)\s+(?:día\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-    
-    # Búsqueda más amplia del nombre para no apoyarse en valores por defecto
     nombre_firmante = re.search(r"(?:Cordialmente|Atentamente),\s*\n+([\w\sÁÉÍÓÚáéíóúÑñ\.]+)\n", texto, re.IGNORECASE)
     if not nombre_firmante:
         nombre_firmante = re.search(r"([A-ZÁÉÍÓÚÑ\s]{10,50})\n\s*(?:C\.C\.|cédula|cedula)", texto)
@@ -93,9 +91,10 @@ def extraer_datos_carta(file_bytes):
 def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
     centro_oficial = "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá"
     cargo_oficial = "Profesional G04 (e)"
+    cargo_director = "LA SUBDIRECTORA (E)"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
-        return cargo_oficial, centro_oficial
+        return cargo_oficial, centro_oficial, cargo_director
 
     lector = PdfReader(MAESTRO_CARGOS)
     nombre_buscar = nombre_empleado.upper().strip()
@@ -124,12 +123,19 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
             
             if coincide_cedula or coincide_nombre:
                 centro_oficial = NOMBRES_CENTROS_LIMPIOS.get(codigo_dep_detectado, NOMBRES_CENTROS_LIMPIOS["9110"])
+                
+                # Definir cargo del director según la dependencia
+                if codigo_dep_detectado == "1010":
+                    cargo_director = "EL DIRECTOR REGIONAL"
+                else:
+                    cargo_director = "LA SUBDIRECTORA (E)"
+
                 match_cargo = re.search(r"(Instructor\s+G\d+|Profesional\s+G\d+(?:\s*\(e\))?|Tecnico\s+G\d+|Secretaria\s+G\d+|Auxiliar\s+G\d+|Subdirector\s+De\s+Centro|Oficial\s+Mantto[^\d]*G\d+)", linea, re.IGNORECASE)
                 if match_cargo:
                     cargo_oficial = match_cargo.group(1).strip()
-                return cargo_oficial, centro_oficial
+                return cargo_oficial, centro_oficial, cargo_director
                 
-    return cargo_oficial, centro_oficial
+    return cargo_oficial, centro_oficial, cargo_director
 
 def forzar_formato_una_hoja(doc, dic_reemplazos):
     for section in doc.sections:
@@ -209,7 +215,7 @@ else:
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
                     nombre_completo = f"{fila_emp['Nombre del Empleado']} {fila_emp['Apellidos Empleado']}".upper()
                     
-                    cargo, centro = obtener_cargo_y_centro_oficial(nombre_completo, str(cedula_num))
+                    cargo, centro, cargo_director = obtener_cargo_y_centro_oficial(nombre_completo, str(cedula_num))
                     
                     meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
                     
@@ -228,6 +234,7 @@ else:
                     doc = Document(PLANTILLA_WORD)
                     
                     reemplazos = {
+                        "[CARGO_DIRECTOR]": cargo_director,
                         "[NOMBRE_EMPLEADO]": nombre_completo,
                         "[CEDULA]": cedula_puntos,
                         "[CARGO]": cargo,
