@@ -243,7 +243,7 @@ else:
 
                     st.balloons()
                     # MENSAJE PERSONALIZADO CON EL NOMBRE DEL FUNCIONARIO Y CÉDULA
-                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo} (C.C. {cedula_puntos}) en 1 sola hoja!")
+                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo} (C.C. {cedula_puntos})!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
