@@ -99,15 +99,16 @@ def extraer_datos_carta(file_bytes):
             return datetime.date(int(partes[2]), meses[partes[1].strip()], int(partes[0]))
         return datetime.date.today()
 
-    f_inicio_str = fecha_disfrute.group(1).strip() if fecha_disfrute else "01 de agosto de 2026"
+    f_inicio_str = fecha_disfrute.group(1).strip() if fecha_disfrute else ""
     
+    # SIN VALORES POR DEFECTO FIJOS
     return {
-        "radicado": radicado.group(1) if radicado else "15-1-2026-000000",
-        "fecha_radicado": fecha_rad.group(1) if fecha_rad else "01 de enero de 2026",
-        "periodo_inicio": periodo.group(1) if periodo else "10 de enero de 2025",
-        "periodo_fin": periodo.group(2) if periodo else "10 de enero de 2026",
+        "radicado": radicado.group(1) if radicado else "SIN RADICADO",
+        "fecha_radicado": fecha_rad.group(1) if fecha_rad else "FECHA_PENDIENTE",
+        "periodo_inicio": periodo.group(1) if periodo else "",
+        "periodo_fin": periodo.group(2) if periodo else "",
         "fecha_inicio_texto": f_inicio_str,
-        "fecha_inicio_obj": parse_fecha(f_inicio_str),
+        "fecha_inicio_obj": parse_fecha(f_inicio_str) if f_inicio_str else datetime.date.today(),
         "cedula_extraida": cedula_limpia,
         "texto_completo_pdf": texto.upper()
     }
@@ -222,18 +223,23 @@ else:
                     if not filas.empty:
                         fila_encontrada = filas.iloc[0]
                 
-                # 2. Buscar por nombre en el texto del PDF
+                # 2. Buscar por coincidencia de Nombres y Apellidos en el texto del PDF
                 if fila_encontrada is None:
                     texto_pdf = datos_carta['texto_completo_pdf']
                     for idx, fila in df_kactus.iterrows():
                         nom = str(fila['Nombre del Empleado']).strip().upper()
                         ape = str(fila['Apellidos Empleado']).strip().upper()
-                        if len(nom) > 3 and (f"{nom} {ape}" in texto_pdf or (nom in texto_pdf and ape in texto_pdf)):
-                            fila_encontrada = fila
-                            break
+                        partes_nom = nom.split()
+                        partes_ape = ape.split()
+                        
+                        # Coincidencia si el primer nombre y primer apellido están en el PDF
+                        if len(partes_nom) > 0 and len(partes_ape) > 0:
+                            if partes_nom[0] in texto_pdf and partes_ape[0] in texto_pdf:
+                                fila_encontrada = fila
+                                break
 
                 if fila_encontrada is None:
-                    st.error("❌ No se pudo identificar al funcionario en la base de datos Kactus. Asegúrate de que el PDF contenga el texto legible con la cédula o nombres del solicitante.")
+                    st.error("❌ No se pudo identificar al funcionario en la base de datos Kactus. Asegúrate de que el PDF sea legible y que el funcionario aparezca en la lista Excel de vacaciones.")
                 else:
                     cedula_num = int(fila_encontrada['Identificación'])
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
@@ -274,7 +280,7 @@ else:
                     
                     forzar_formato_una_hoja(doc, reemplazos)
 
-                    salida_path = os.path.join(BASE_DIR, "Resolucion_Generada.docx")
+                    salida_path = os.path.join(BASE_DIR, f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx")
                     doc.save(salida_path)
 
                     st.balloons()
