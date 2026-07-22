@@ -83,7 +83,6 @@ def extraer_datos_carta(file_bytes):
         
     fecha_disfrute = re.search(r"(?:partir\s+del|inicio\s+a\s+partir\s+del)\s+(?:día\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
     
-    # EXPRESIÓN REGULAR CORREGIDA (sin el corchete sobrante)
     todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", texto, re.IGNORECASE)
     cedula_limpia = None
     for c in todas_cedulas:
@@ -215,29 +214,30 @@ else:
                 nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
                 df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
 
-                coincidencias = pd.DataFrame()
+                fila_encontrada = None
                 
                 # 1. Buscar por Cédula extraída del PDF
                 if datos_carta['cedula_extraida']:
-                    coincidencias = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
+                    filas = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
+                    if not filas.empty:
+                        fila_encontrada = filas.iloc[0]
                 
-                # 2. Si no encuentra por cédula, buscar por nombre coincidente
-                if coincidencias.empty:
+                # 2. Buscar por nombre en el texto del PDF
+                if fila_encontrada is None:
                     texto_pdf = datos_carta['texto_completo_pdf']
                     for idx, fila in df_kactus.iterrows():
                         nom = str(fila['Nombre del Empleado']).strip().upper()
                         ape = str(fila['Apellidos Empleado']).strip().upper()
                         if len(nom) > 3 and (f"{nom} {ape}" in texto_pdf or (nom in texto_pdf and ape in texto_pdf)):
-                            coincidencias = df_kactus[df_kactus['Identificación'] == fila['Identificación']]
+                            fila_encontrada = fila
                             break
 
-                if coincidencias.empty:
+                if fila_encontrada is None:
                     st.error("❌ No se pudo identificar al funcionario en la base de datos Kactus. Asegúrate de que el PDF contenga el texto legible con la cédula o nombres del solicitante.")
                 else:
-                    fila_emp = coincidencias.iloc[-1]
-                    cedula_num = int(fila_emp['Identificación'])
+                    cedula_num = int(fila_encontrada['Identificación'])
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
-                    nombre_completo = f"{fila_emp['Nombre del Empleado']} {fila_emp['Apellidos Empleado']}".upper()
+                    nombre_completo = f"{fila_encontrada['Nombre del Empleado']} {fila_encontrada['Apellidos Empleado']}".upper()
                     
                     cargo, centro, cargo_director = obtener_cargo_y_centro_oficial(nombre_completo, str(cedula_num))
                     
@@ -250,7 +250,7 @@ else:
                     
                     f_inicio_obj = datos_carta['fecha_inicio_obj']
                     dia_ini_str = f"{f_inicio_obj.day:02d}" if f_inicio_obj.day < 10 else f"{f_inicio_obj.day}"
-                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {fecha_inicio_formateada_year if 'fecha_inicio_formateada_year' in locals() else f_inicio_obj.year}"
+                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {f_inicio_obj.year}"
 
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
