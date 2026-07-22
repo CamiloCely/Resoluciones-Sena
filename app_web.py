@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import datetime
 import pandas as pd
 from pypdf import PdfReader
@@ -44,7 +45,7 @@ PLANTILLA_WORD = os.path.join(BASE_DIR, archivos_word[0]) if archivos_word else 
 archivos_pdf_maestro = [f for f in os.listdir(BASE_DIR) if "MAESTRO" in f.upper() and f.lower().endswith('.pdf')]
 MAESTRO_CARGOS = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else (os.path.join(BASE_DIR, archivos_pdf_maestro[0]) if archivos_pdf_maestro else None)
 
-if st.sidebar.button("🔄 Reiniciar / Limpiar Memoria"):
+if st.sidebar.button("🔄 Reiniciar Memoria / Forzar Limpieza"):
     st.cache_data.clear()
     st.rerun()
 
@@ -101,9 +102,8 @@ def extraer_datos_carta(file_bytes):
 
     f_inicio_str = fecha_disfrute.group(1).strip() if fecha_disfrute else ""
     
-    # SIN VALORES POR DEFECTO FIJOS
     return {
-        "radicado": radicado.group(1) if radicado else "SIN RADICADO",
+        "radicado": radicado.group(1) if radicado else "15-1-2026-000000",
         "fecha_radicado": fecha_rad.group(1) if fecha_rad else "FECHA_PENDIENTE",
         "periodo_inicio": periodo.group(1) if periodo else "",
         "periodo_fin": periodo.group(2) if periodo else "",
@@ -229,17 +229,16 @@ else:
                     for idx, fila in df_kactus.iterrows():
                         nom = str(fila['Nombre del Empleado']).strip().upper()
                         ape = str(fila['Apellidos Empleado']).strip().upper()
-                        partes_nom = nom.split()
-                        partes_ape = ape.split()
+                        p_nom = nom.split()[0] if nom else ""
+                        p_ape = ape.split()[0] if ape else ""
                         
-                        # Coincidencia si el primer nombre y primer apellido están en el PDF
-                        if len(partes_nom) > 0 and len(partes_ape) > 0:
-                            if partes_nom[0] in texto_pdf and partes_ape[0] in texto_pdf:
+                        if len(p_nom) > 2 and len(p_ape) > 2:
+                            if p_nom in texto_pdf and p_ape in texto_pdf:
                                 fila_encontrada = fila
                                 break
 
                 if fila_encontrada is None:
-                    st.error("❌ No se pudo identificar al funcionario en la base de datos Kactus. Asegúrate de que el PDF sea legible y que el funcionario aparezca en la lista Excel de vacaciones.")
+                    st.error("❌ No se pudo identificar al funcionario del PDF en la base de datos Kactus. Verifica que el PDF contenga la cédula o nombres legibles.")
                 else:
                     cedula_num = int(fila_encontrada['Identificación'])
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
@@ -280,15 +279,26 @@ else:
                     
                     forzar_formato_una_hoja(doc, reemplazos)
 
-                    salida_path = os.path.join(BASE_DIR, f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx")
+                    # NOMBRE DE ARCHIVO ÚNICO CON TIMESTAMP PARA EVITAR BUGS DE CACHÉ
+                    timestamp_unico = int(time.time())
+                    nombre_archivo_salida = f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}_{timestamp_unico}.docx"
+                    salida_path = os.path.join(BASE_DIR, nombre_archivo_salida)
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo} (C.C. {cedula_puntos})!")
+                    st.success(f"✅ ¡Resolución generada exitosamente!")
                     
+                    # VISTA PREVIA DIRECTA
+                    st.markdown("### 📋 Datos de la Resolución Generada:")
+                    st.write(f"👤 **Funcionario:** {nombre_completo}")
+                    st.write(f"🪪 **Cédula:** {cedula_puntos}")
+                    st.write(f"💼 **Cargo:** {cargo}")
+                    st.write(f"🏢 **Centro:** {centro}")
+                    st.write(f"📅 **Período de Disfrute:** Del {fecha_inicio_formateada} al {fecha_fin_str}")
+
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
-                            label=f"📥 Descargar Resolución de {nombre_completo} (.docx)",
+                            label=f"📥 DESCARGAR DOCUMENTO DE {nombre_completo}",
                             data=file_docx,
                             file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
