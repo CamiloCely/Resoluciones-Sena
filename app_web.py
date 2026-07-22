@@ -60,7 +60,12 @@ def extraer_datos_carta(file_bytes):
         periodo = re.search(r"del\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
         
     fecha_disfrute = re.search(r"(?:partir\s+del|inicio\s+a\s+partir\s+del)\s+(?:día\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-    nombre_firmante = re.search(r"Cordialmente,\s*\n+([\w\sÁÉÍÓÚáéíóúÑñ\.]+)\n", texto)
+    
+    # Búsqueda más amplia del nombre para no apoyarse en valores por defecto
+    nombre_firmante = re.search(r"(?:Cordialmente|Atentamente),\s*\n+([\w\sÁÉÍÓÚáéíóúÑñ\.]+)\n", texto, re.IGNORECASE)
+    if not nombre_firmante:
+        nombre_firmante = re.search(r"([A-ZÁÉÍÓÚÑ\s]{10,50})\n\s*(?:C\.C\.|cédula|cedula)", texto)
+
     cedula_match = re.search(r"(?:C\.C\.|cédula|cedula)\s*([\d\.]+)", texto, re.IGNORECASE)
 
     meses = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
@@ -72,13 +77,13 @@ def extraer_datos_carta(file_bytes):
         return datetime.date(2026, 6, 16)
 
     f_inicio_str = fecha_disfrute.group(1).strip() if fecha_disfrute else "16 de junio de 2026"
-    solic_nombre = nombre_firmante.group(1).replace(".", "").strip() if nombre_firmante else "WILMAR AUGUSTO REINA ACERO"
+    solic_nombre = nombre_firmante.group(1).replace(".", "").strip() if nombre_firmante else None
     
     return {
-        "radicado": radicado.group(1) if radicado else "15-1-2026-003231",
-        "fecha_radicado": fecha_rad.group(1) if fecha_rad else "04 de mayo de 2026",
-        "periodo_inicio": periodo.group(1) if periodo else "01 de marzo de 2023",
-        "periodo_fin": periodo.group(2) if periodo else "28 de febrero de 2024",
+        "radicado": radicado.group(1) if radicado else "15-1-2026-000000",
+        "fecha_radicado": fecha_rad.group(1) if fecha_rad else "01 de enero de 2026",
+        "periodo_inicio": periodo.group(1) if periodo else "",
+        "periodo_fin": periodo.group(2) if periodo else "",
         "fecha_inicio_texto": f_inicio_str,
         "fecha_inicio_obj": parse_fecha(f_inicio_str),
         "solicitante": solic_nombre,
@@ -171,7 +176,7 @@ else:
     st.sidebar.success(f"Excel: {os.path.basename(EXCEL_HISTORIAL)}")
     st.sidebar.success(f"Plantilla: {os.path.basename(PLANTILLA_WORD)}")
 
-    if st.sidebar.button("🔄 Limpiar memoria / Nuevo funcionario"):
+    if st.sidebar.button("🔄 Reiniciar / Nuevo Funcionario"):
         st.cache_data.clear()
         st.rerun()
 
@@ -192,12 +197,12 @@ else:
                 if datos_carta['cedula_extraida']:
                     coincidencias = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                 
-                if coincidencias.empty:
+                if coincidencias.empty and datos_carta['solicitante']:
                     pri_nom = datos_carta['solicitante'].upper().split()[0]
                     coincidencias = df_kactus[df_kactus['Nombre del Empleado'].str.upper().str.contains(pri_nom, na=False)]
                 
                 if coincidencias.empty:
-                    st.error(f"❌ No se encontró a {datos_carta['solicitante']} en la base de datos de vacaciones.")
+                    st.error(f"❌ No se pudo encontrar al funcionario en la base de datos de vacaciones. Por favor verifica que el PDF contenga la cédula o el nombre completo del remitente.")
                 else:
                     fila_emp = coincidencias.iloc[-1]
                     cedula_num = int(fila_emp['Identificación'])
@@ -242,8 +247,7 @@ else:
                     doc.save(salida_path)
 
                     st.balloons()
-                    # MENSAJE PERSONALIZADO CON EL NOMBRE DEL FUNCIONARIO Y CÉDULA
-                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo} (C.C. {cedula_puntos})!")
+                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo} (C.C. {cedula_puntos}) en 1 sola hoja!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
