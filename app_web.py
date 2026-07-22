@@ -16,15 +16,40 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Carga de archivos base
+# --- SECCIÓN DE ADMINISTRACIÓN Y ACTUALIZACIÓN DE ARCHIVOS BASE ---
+st.sidebar.title("⚙️ Administración de Bases de Datos")
+st.sidebar.markdown("Puedes actualizar los archivos base en cualquier momento subiendo los nuevos aquí:")
+
+# Cargadores dinámicos en barra lateral
+nuevo_excel = st.sidebar.file_uploader("📊 Actualizar Excel Kactus / Vacaciones", type=["xlsx", "xls"])
+if nuevo_excel is not None:
+    path_nuevo_excel = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")
+    with open(path_nuevo_excel, "wb") as f:
+        f.write(nuevo_excel.getbuffer())
+    st.sidebar.success("✅ Base de Vacaciones actualizada.")
+
+nuevo_maestro = st.sidebar.file_uploader("📋 Actualizar Maestro por Dependencias (PDF)", type=["pdf"])
+if nuevo_maestro is not None:
+    path_nuevo_maestro = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")
+    with open(path_nuevo_maestro, "wb") as f:
+        f.write(nuevo_maestro.getbuffer())
+    st.sidebar.success("✅ Maestro de Dependencias actualizado.")
+
+st.sidebar.divider()
+
+# Detección de archivos activos en la carpeta
 archivos_excel = [f for f in os.listdir(BASE_DIR) if f.lower().endswith(('.xlsx', '.xls'))]
-EXCEL_HISTORIAL = os.path.join(BASE_DIR, archivos_excel[0]) if archivos_excel else None
+EXCEL_HISTORIAL = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx") if os.path.exists(os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")) else (os.path.join(BASE_DIR, archivos_excel[0]) if archivos_excel else None)
 
 archivos_word = [f for f in os.listdir(BASE_DIR) if f.lower().endswith('.docx') and not f.startswith('~$')]
 PLANTILLA_WORD = os.path.join(BASE_DIR, archivos_word[0]) if archivos_word else None
 
 archivos_pdf_maestro = [f for f in os.listdir(BASE_DIR) if "MAESTRO" in f.upper() and f.lower().endswith('.pdf')]
-MAESTRO_CARGOS = os.path.join(BASE_DIR, archivos_pdf_maestro[0]) if archivos_pdf_maestro else None
+MAESTRO_CARGOS = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else (os.path.join(BASE_DIR, archivos_pdf_maestro[0]) if archivos_pdf_maestro else None)
+
+if st.sidebar.button("🔄 Reiniciar / Nuevo Funcionario"):
+    st.cache_data.clear()
+    st.rerun()
 
 FESTIVOS_COLOMBIA = [
     datetime.date(2026, 1, 1),   datetime.date(2026, 1, 12),  datetime.date(2026, 3, 23),
@@ -124,7 +149,6 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
             if coincide_cedula or coincide_nombre:
                 centro_oficial = NOMBRES_CENTROS_LIMPIOS.get(codigo_dep_detectado, NOMBRES_CENTROS_LIMPIOS["9110"])
                 
-                # Definir cargo del director según la dependencia
                 if codigo_dep_detectado == "1010":
                     cargo_director = "EL DIRECTOR REGIONAL"
                 else:
@@ -171,21 +195,13 @@ def forzar_formato_una_hoja(doc, dic_reemplazos):
                 for p in celda.paragraphs:
                     procesar_parrafo(p)
 
-# --- INTERFAZ STREAMLIT ---
+# --- INTERFAZ PRINCIPAL STREAMLIT ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
 st.markdown("Carga la carta de solicitud enviada por el funcionario (PDF) para generar la resolución oficial en Word.")
 
 if not EXCEL_HISTORIAL or not PLANTILLA_WORD:
-    st.error("⚠️ Verifica que el archivo Excel de vacaciones y la plantilla .docx estén subidos al repositorio de GitHub.")
+    st.error("⚠️ Verifica que la plantilla .docx y la base Excel estén configuradas.")
 else:
-    st.sidebar.header("📁 Archivos Base Activos")
-    st.sidebar.success(f"Excel: {os.path.basename(EXCEL_HISTORIAL)}")
-    st.sidebar.success(f"Plantilla: {os.path.basename(PLANTILLA_WORD)}")
-
-    if st.sidebar.button("🔄 Reiniciar / Nuevo Funcionario"):
-        st.cache_data.clear()
-        st.rerun()
-
     archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
