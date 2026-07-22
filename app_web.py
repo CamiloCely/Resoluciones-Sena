@@ -127,11 +127,6 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
     return cargo_oficial, centro_oficial
 
 def forzar_formato_una_hoja(doc, dic_reemplazos):
-    """
-    1. Ajusta márgenes gigantes a 2 cm.
-    2. Reemplaza etiquetas.
-    3. Normaliza espaciado para asegurar estricta dimensión de 1 HOJA.
-    """
     for section in doc.sections:
         section.top_margin = Cm(2.2)
         section.bottom_margin = Cm(2.0)
@@ -176,7 +171,6 @@ else:
     st.sidebar.success(f"Excel: {os.path.basename(EXCEL_HISTORIAL)}")
     st.sidebar.success(f"Plantilla: {os.path.basename(PLANTILLA_WORD)}")
 
-    # Botón para limpiar memoria si cambia de funcionario o computador
     if st.sidebar.button("🔄 Limpiar memoria / Nuevo funcionario"):
         st.cache_data.clear()
         st.rerun()
@@ -187,7 +181,7 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando datos y forzando documento a 1 sola hoja..."):
+            with st.spinner("Procesando datos del funcionario..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
@@ -221,7 +215,7 @@ else:
                     
                     f_inicio_obj = datos_carta['fecha_inicio_obj']
                     dia_ini_str = f"{f_inicio_obj.day:02d}" if f_inicio_obj.day < 10 else f"{f_inicio_obj.day}"
-                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {fecha_inicio_formateada_year if 'fecha_inicio_formateada_year' in locals() else f_inicio_obj.year}"
+                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {f_inicio_obj.year}"
 
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
@@ -248,11 +242,12 @@ else:
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución ajustada exitosamente en 1 sola hoja!")
+                    # MENSAJE PERSONALIZADO CON EL NOMBRE DEL FUNCIONARIO Y CÉDULA
+                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo} (C.C. {cedula_puntos}) en 1 sola hoja!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
-                            label="📥 Descargar Resolución en Word (.docx)",
+                            label=f"📥 Descargar Resolución de {nombre_completo} (.docx)",
                             data=file_docx,
                             file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
