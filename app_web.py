@@ -16,11 +16,9 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- SECCIÓN DE ADMINISTRACIÓN Y ACTUALIZACIÓN DE ARCHIVOS BASE ---
+# --- SECCIÓN DE ADMINISTRACIÓN DE ARCHIVOS BASE ---
 st.sidebar.title("⚙️ Administración de Bases de Datos")
-st.sidebar.markdown("Puedes actualizar los archivos base en cualquier momento subiendo los nuevos aquí:")
 
-# Cargadores dinámicos en barra lateral
 nuevo_excel = st.sidebar.file_uploader("📊 Actualizar Excel Kactus / Vacaciones", type=["xlsx", "xls"])
 if nuevo_excel is not None:
     path_nuevo_excel = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")
@@ -37,7 +35,6 @@ if nuevo_maestro is not None:
 
 st.sidebar.divider()
 
-# Detección de archivos activos en la carpeta
 archivos_excel = [f for f in os.listdir(BASE_DIR) if f.lower().endswith(('.xlsx', '.xls'))]
 EXCEL_HISTORIAL = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx") if os.path.exists(os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")) else (os.path.join(BASE_DIR, archivos_excel[0]) if archivos_excel else None)
 
@@ -47,7 +44,7 @@ PLANTILLA_WORD = os.path.join(BASE_DIR, archivos_word[0]) if archivos_word else 
 archivos_pdf_maestro = [f for f in os.listdir(BASE_DIR) if "MAESTRO" in f.upper() and f.lower().endswith('.pdf')]
 MAESTRO_CARGOS = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else (os.path.join(BASE_DIR, archivos_pdf_maestro[0]) if archivos_pdf_maestro else None)
 
-if st.sidebar.button("🔄 Reiniciar / Nuevo Funcionario"):
+if st.sidebar.button("🔄 Reiniciar / Limpiar Memoria"):
     st.cache_data.clear()
     st.rerun()
 
@@ -85,11 +82,15 @@ def extraer_datos_carta(file_bytes):
         periodo = re.search(r"del\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
         
     fecha_disfrute = re.search(r"(?:partir\s+del|inicio\s+a\s+partir\s+del)\s+(?:día\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-    nombre_firmante = re.search(r"(?:Cordialmente|Atentamente),\s*\n+([\w\sÁÉÍÓÚáéíóúÑñ\.]+)\n", texto, re.IGNORECASE)
-    if not nombre_firmante:
-        nombre_firmante = re.search(r"([A-ZÁÉÍÓÚÑ\s]{10,50})\n\s*(?:C\.C\.|cédula|cedula)", texto)
-
-    cedula_match = re.search(r"(?:C\.C\.|cédula|cedula)\s*([\d\.]+)", texto, re.IGNORECASE)
+    
+    # Extraer todas las cédulas posibles del PDF
+    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.\]{7,12})", texto, re.IGNORECASE)
+    cedula_limpia = None
+    for c in todas_cedulas:
+        num = c.replace(".", "").strip()
+        if num.isdigit() and len(num) >= 7 and len(num) <= 10:
+            cedula_limpia = num
+            break
 
     meses = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
     
@@ -97,25 +98,24 @@ def extraer_datos_carta(file_bytes):
         partes = txt_fecha.lower().replace("de", "").split()
         if len(partes) >= 3 and partes[1].strip() in meses:
             return datetime.date(int(partes[2]), meses[partes[1].strip()], int(partes[0]))
-        return datetime.date(2026, 6, 16)
+        return datetime.date.today()
 
-    f_inicio_str = fecha_disfrute.group(1).strip() if fecha_disfrute else "16 de junio de 2026"
-    solic_nombre = nombre_firmante.group(1).replace(".", "").strip() if nombre_firmante else None
+    f_inicio_str = fecha_disfrute.group(1).strip() if fecha_disfrute else "01 de agosto de 2026"
     
     return {
         "radicado": radicado.group(1) if radicado else "15-1-2026-000000",
         "fecha_radicado": fecha_rad.group(1) if fecha_rad else "01 de enero de 2026",
-        "periodo_inicio": periodo.group(1) if periodo else "",
-        "periodo_fin": periodo.group(2) if periodo else "",
+        "periodo_inicio": periodo.group(1) if periodo else "10 de enero de 2025",
+        "periodo_fin": periodo.group(2) if periodo else "10 de enero de 2026",
         "fecha_inicio_texto": f_inicio_str,
         "fecha_inicio_obj": parse_fecha(f_inicio_str),
-        "solicitante": solic_nombre,
-        "cedula_extraida": cedula_match.group(1).replace(".", "").strip() if cedula_match else None
+        "cedula_extraida": cedula_limpia,
+        "texto_completo_pdf": texto.upper()
     }
 
 def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
     centro_oficial = "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá"
-    cargo_oficial = "Profesional G04 (e)"
+    cargo_oficial = "Profesional G06"
     cargo_director = "LA SUBDIRECTORA (E)"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
@@ -208,7 +208,7 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Procesando datos del funcionario..."):
+            with st.spinner("Buscando coincidencia exacta en la base de datos Kactus..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
@@ -216,15 +216,23 @@ else:
                 df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
 
                 coincidencias = pd.DataFrame()
+                
+                # 1. Buscar por Cédula extraída del PDF
                 if datos_carta['cedula_extraida']:
                     coincidencias = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                 
-                if coincidencias.empty and datos_carta['solicitante']:
-                    pri_nom = datos_carta['solicitante'].upper().split()[0]
-                    coincidencias = df_kactus[df_kactus['Nombre del Empleado'].str.upper().str.contains(pri_nom, na=False)]
-                
+                # 2. Si no encuentra por cédula, buscar cuál persona del Excel aparece mencionada en el texto del PDF
                 if coincidencias.empty:
-                    st.error(f"❌ No se pudo encontrar al funcionario en la base de datos de vacaciones. Por favor verifica que el PDF contenga la cédula o el nombre completo del remitente.")
+                    texto_pdf = datos_carta['texto_completo_pdf']
+                    for idx, fila in df_kactus.iterrows():
+                        nom = str(fila['Nombre del Empleado']).strip().upper()
+                        ape = str(fila['Apellidos Empleado']).strip().upper()
+                        if len(nom) > 3 and (f"{nom} {ape}" in texto_pdf or (nom in texto_pdf and ape in texto_pdf)):
+                            coincidencias = df_kactus[df_kactus['Identificación'] == fila['Identificación']]
+                            break
+
+                if coincidencias.empty:
+                    st.error("❌ No se pudo identificar al funcionario en la base de datos Kactus. Asegúrate de que el PDF contenga el texto legible con la cédula o nombres del solicitante.")
                 else:
                     fila_emp = coincidencias.iloc[-1]
                     cedula_num = int(fila_emp['Identificación'])
@@ -270,7 +278,7 @@ else:
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo} (C.C. {cedula_puntos}) en 1 sola hoja!")
+                    st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo} (C.C. {cedula_puntos})!")
                     
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
