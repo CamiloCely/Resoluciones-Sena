@@ -83,12 +83,12 @@ def extraer_datos_carta(file_bytes):
         
     fecha_disfrute = re.search(r"(?:partir\s+del|inicio\s+a\s+partir\s+del)\s+(?:día\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
     
-    # Extraer todas las cédulas posibles del PDF
-    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.\]{7,12})", texto, re.IGNORECASE)
+    # EXPRESIÓN REGULAR CORREGIDA (sin el corchete sobrante)
+    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", texto, re.IGNORECASE)
     cedula_limpia = None
     for c in todas_cedulas:
         num = c.replace(".", "").strip()
-        if num.isdigit() and len(num) >= 7 and len(num) <= 10:
+        if num.isdigit() and 7 <= len(num) <= 10:
             cedula_limpia = num
             break
 
@@ -221,7 +221,7 @@ else:
                 if datos_carta['cedula_extraida']:
                     coincidencias = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                 
-                # 2. Si no encuentra por cédula, buscar cuál persona del Excel aparece mencionada en el texto del PDF
+                # 2. Si no encuentra por cédula, buscar por nombre coincidente
                 if coincidencias.empty:
                     texto_pdf = datos_carta['texto_completo_pdf']
                     for idx, fila in df_kactus.iterrows():
@@ -250,7 +250,7 @@ else:
                     
                     f_inicio_obj = datos_carta['fecha_inicio_obj']
                     dia_ini_str = f"{f_inicio_obj.day:02d}" if f_inicio_obj.day < 10 else f"{f_inicio_obj.day}"
-                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {f_inicio_obj.year}"
+                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {fecha_inicio_formateada_year if 'fecha_inicio_formateada_year' in locals() else f_inicio_obj.year}"
 
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
