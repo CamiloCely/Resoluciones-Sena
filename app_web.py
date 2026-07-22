@@ -132,7 +132,6 @@ def forzar_formato_una_hoja(doc, dic_reemplazos):
     2. Reemplaza etiquetas.
     3. Normaliza espaciado para asegurar estricta dimensión de 1 HOJA.
     """
-    # Fix de Márgenes (de 5.3 cm pasa a 2.2 cm)
     for section in doc.sections:
         section.top_margin = Cm(2.2)
         section.bottom_margin = Cm(2.0)
@@ -140,7 +139,6 @@ def forzar_formato_una_hoja(doc, dic_reemplazos):
         section.right_margin = Cm(2.5)
 
     def procesar_parrafo(p):
-        # Normalizar espaciado de párrafos para compactar espacio
         p.paragraph_format.space_before = Pt(2)
         p.paragraph_format.space_after = Pt(2)
 
@@ -178,7 +176,12 @@ else:
     st.sidebar.success(f"Excel: {os.path.basename(EXCEL_HISTORIAL)}")
     st.sidebar.success(f"Plantilla: {os.path.basename(PLANTILLA_WORD)}")
 
-    archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"])
+    # Botón para limpiar memoria si cambia de funcionario o computador
+    if st.sidebar.button("🔄 Limpiar memoria / Nuevo funcionario"):
+        st.cache_data.clear()
+        st.rerun()
+
+    archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
@@ -218,7 +221,7 @@ else:
                     
                     f_inicio_obj = datos_carta['fecha_inicio_obj']
                     dia_ini_str = f"{f_inicio_obj.day:02d}" if f_inicio_obj.day < 10 else f"{f_inicio_obj.day}"
-                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {f_inicio_obj.year}"
+                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {fecha_inicio_formateada_year if 'fecha_inicio_formateada_year' in locals() else f_inicio_obj.year}"
 
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
