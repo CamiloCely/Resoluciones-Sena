@@ -114,22 +114,23 @@ def extraer_datos_carta(file_bytes):
     }
 
 def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
-    centro_oficial = "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá"
+    centro_oficial = "CENTRO DE DESARROLLO AGROPECUARIO Y AGROINDUSTRIAL DE LA REGIONAL BOYACÁ"
     cargo_oficial = "Profesional G06"
     cargo_director = "LA SUBDIRECTORA (E)"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
-        return cargo_oficial, centro_oficial, cargo_director
+        return cargo_oficial, centro_oficial.upper(), cargo_director.upper()
 
     lector = PdfReader(MAESTRO_CARGOS)
     nombre_buscar = nombre_empleado.upper().strip()
     
+    # NOMBRES EN MAYÚSCULAS SOSTENIDAS PARA EL ENCABEZADO
     NOMBRES_CENTROS_LIMPIOS = {
-        "9110": "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá",
-        "9111": "Centro Minero de la regional Boyacá",
-        "9305": "Centro de Gestión Administrativa y Fortalecimiento Empresarial de la regional Boyacá",
-        "9514": "Centro Industrial de Mantenimiento y Manufactura de la regional Boyacá",
-        "1010": "Despacho Dirección Regional Boyacá"
+        "9110": "CENTRO DE DESARROLLO AGROPECUARIO Y AGROINDUSTRIAL DE LA REGIONAL BOYACÁ",
+        "9111": "CENTRO MINERO DE LA REGIONAL BOYACÁ",
+        "9305": "CENTRO DE GESTIÓN ADMINISTRATIVA Y FORTALECIMIENTO EMPRESARIAL DE LA REGIONAL BOYACÁ",
+        "9514": "CENTRO INDUSTRIAL DE MANTENIMIENTO Y MANUFACTURA DE LA REGIONAL BOYACÁ",
+        "1010": "DESPACHO DIRECCIÓN REGIONAL BOYACÁ"
     }
 
     codigo_dep_detectado = "9110"
@@ -157,9 +158,9 @@ def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
                 match_cargo = re.search(r"(Instructor\s+G\d+|Profesional\s+G\d+(?:\s*\(e\))?|Tecnico\s+G\d+|Secretaria\s+G\d+|Auxiliar\s+G\d+|Subdirector\s+De\s+Centro|Oficial\s+Mantto[^\d]*G\d+)", linea, re.IGNORECASE)
                 if match_cargo:
                     cargo_oficial = match_cargo.group(1).strip()
-                return cargo_oficial, centro_oficial, cargo_director
+                return cargo_oficial, centro_oficial.upper(), cargo_director.upper()
                 
-    return cargo_oficial, centro_oficial, cargo_director
+    return cargo_oficial, centro_oficial.upper(), cargo_director.upper()
 
 def forzar_formato_una_hoja(doc, dic_reemplazos):
     for section in doc.sections:
@@ -223,7 +224,7 @@ else:
                     if not filas.empty:
                         fila_encontrada = filas.iloc[0]
                 
-                # 2. Buscar por coincidencia de Nombres y Apellidos en el texto del PDF
+                # 2. Buscar por coincidencia de Nombres y Apellidos
                 if fila_encontrada is None:
                     texto_pdf = datos_carta['texto_completo_pdf']
                     for idx, fila in df_kactus.iterrows():
@@ -279,7 +280,6 @@ else:
                     
                     forzar_formato_una_hoja(doc, reemplazos)
 
-                    # NOMBRE DE ARCHIVO ÚNICO CON TIMESTAMP PARA EVITAR BUGS DE CACHÉ
                     timestamp_unico = int(time.time())
                     nombre_archivo_salida = f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}_{timestamp_unico}.docx"
                     salida_path = os.path.join(BASE_DIR, nombre_archivo_salida)
@@ -288,7 +288,6 @@ else:
                     st.balloons()
                     st.success(f"✅ ¡Resolución generada exitosamente!")
                     
-                    # VISTA PREVIA DIRECTA
                     st.markdown("### 📋 Datos de la Resolución Generada:")
                     st.write(f"👤 **Funcionario:** {nombre_completo}")
                     st.write(f"🪪 **Cédula:** {cedula_puntos}")
