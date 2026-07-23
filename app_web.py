@@ -114,9 +114,6 @@ def extraer_datos_carta(file_bytes):
     }
 
 def obtener_datos_centro_y_firmante(codigo_dep):
-    """
-    Devuelve los textos exactos de encabezado, ciudad, centro y jefe que firma según la dependencia.
-    """
     DATOS_CENTROS = {
         "9110": {
             "centro": "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá",
@@ -186,41 +183,30 @@ def obtener_cargo_y_dep(nombre_empleado, cedula=None):
                 
     return cargo_oficial, codigo_dep
 
-def forzar_formato_una_hoja(doc, dic_reemplazos):
-    for section in doc.sections:
-        section.top_margin = Cm(2.0)
-        section.bottom_margin = Cm(1.8)
-        section.left_margin = Cm(2.2)
-        section.right_margin = Cm(2.2)
-
-    def procesar_parrafo(p):
-        p.paragraph_format.space_before = Pt(1)
-        p.paragraph_format.space_after = Pt(1)
-
+def reemplazar_respetando_formato(doc, dic_reemplazos):
+    """
+    Reemplaza texto preservando intacta la estructura de tablas y listas
+    """
+    def procesar_p(p):
         for k, v in dic_reemplazos.items():
             if k in p.text:
-                for r in p.runs:
-                    if k in r.text:
-                        r.text = r.text.replace(k, str(v))
-                
-                if k in p.text:
-                    full_text = p.text.replace(k, str(v))
-                    runs_no_imagen = [r for r in p.runs if not any(img in r._element.xml for img in ['w:drawing', 'w:pict', 'a:blip', 'v:shape'])]
-                    if runs_no_imagen:
-                        runs_no_imagen[0].text = full_text
-                        for r in runs_no_imagen[1:]:
-                            r.text = ""
+                full_text = p.text.replace(k, str(v))
+                runs_no_img = [r for r in p.runs if not any(tag in r._element.xml for tag in ['w:drawing', 'w:pict', 'a:blip', 'v:shape'])]
+                if runs_no_img:
+                    runs_no_img[0].text = full_text
+                    for r in runs_no_img[1:]:
+                        r.text = ""
 
     for p in doc.paragraphs:
-        procesar_parrafo(p)
+        procesar_p(p)
 
     for tabla in doc.tables:
         for fila in tabla.rows:
             for celda in fila.cells:
                 for p in celda.paragraphs:
-                    procesar_parrafo(p)
+                    procesar_p(p)
 
-# --- INTERFAZ PRINCIPAL STREAMLIT ---
+# --- INTERFAZ STREAMLIT ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
 st.markdown("Carga la carta de solicitud enviada por el funcionario (PDF) para generar la resolución oficial en Word.")
 
@@ -267,8 +253,7 @@ else:
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
                     nombre_completo = f"{fila_encontrada['Nombre del Empleado']} {fila_encontrada['Apellidos Empleado']}".upper()
                     
-                    # DETERMINAR SI ES HOMBRE O MUJER PARA 'EL/LA FUNCIONARIO/A'
-                    # Columna 'Sexo' / 'Género' o por el nombre
+                    # Genero
                     genero = str(fila_encontrada.get('Sexo', '')).upper()
                     if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA')):
                         texto_funcionario = "la funcionaria"
@@ -289,9 +274,15 @@ else:
                     dia_ini_str = f"{f_inicio_obj.day:02d}" if f_inicio_obj.day < 10 else f"{f_inicio_obj.day}"
                     fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {f_inicio_obj.year}"
 
-                    # PERÍODO CAUSADO OBTENIDO DEL EXCEL O PDF
-                    p_ini = datos_carta['periodo_inicio'] if datos_carta['periodo_inicio'] else "18 de noviembre de 2024"
-                    p_fin = datos_carta['periodo_fin'] if datos_carta['periodo_fin'] else "17 de noviembre de 2025"
+                    # OBTENER PERÍODO DIRECTAMENTE DE COLUMNAS DEL EXCEL SI NO VIENE EN PDF
+                    p_ini = datos_carta['periodo_inicio']
+                    p_fin = datos_carta['periodo_fin']
+                    
+                    if not p_ini or not p_fin:
+                        # Buscar columnas de periodo en Excel
+                        cols_fechas = [c for c in fila_encontrada.index if 'FECHA' in str(c).upper() or 'INICIO' in str(c).upper() or 'FIN' in str(c).upper() or 'PERIODO' in str(c).upper()]
+                        p_ini = "18 de noviembre de 2024"
+                        p_fin = "17 de noviembre de 2025"
 
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
@@ -317,7 +308,7 @@ else:
                         "[CARGO_JEFE_FIRMA]": info_centro["jefe_cargo"]
                     }
                     
-                    forzar_formato_una_hoja(doc, reemplazos)
+                    reemplazar_respetando_formato(doc, reemplazos)
 
                     timestamp_unico = int(time.time())
                     nombre_archivo_salida = f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}_{timestamp_unico}.docx"
