@@ -17,7 +17,7 @@ st.set_page_config(
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- SECCIÓN DE ADMINISTRACIÓN DE ARCHIVOS BASE ---
+# --- ADMINISTRACIÓN DE BASES DE DATOS ---
 st.sidebar.title("⚙️ Administración de Bases de Datos")
 
 nuevo_excel = st.sidebar.file_uploader("📊 Actualizar Excel Kactus / Vacaciones", type=["xlsx", "xls"])
@@ -104,74 +104,98 @@ def extraer_datos_carta(file_bytes):
     
     return {
         "radicado": radicado.group(1) if radicado else "15-1-2026-000000",
-        "fecha_radicado": fecha_rad.group(1) if fecha_rad else "FECHA_PENDIENTE",
-        "periodo_inicio": periodo.group(1) if periodo else "",
-        "periodo_fin": periodo.group(2) if periodo else "",
+        "fecha_radicado": fecha_rad.group(1) if fecha_rad else "25 de junio de 2026",
+        "periodo_inicio": periodo.group(1) if periodo else None,
+        "periodo_fin": periodo.group(2) if periodo else None,
         "fecha_inicio_texto": f_inicio_str,
         "fecha_inicio_obj": parse_fecha(f_inicio_str) if f_inicio_str else datetime.date.today(),
         "cedula_extraida": cedula_limpia,
         "texto_completo_pdf": texto.upper()
     }
 
-def obtener_cargo_y_centro_oficial(nombre_empleado, cedula=None):
-    centro_oficial = "CENTRO DE DESARROLLO AGROPECUARIO Y AGROINDUSTRIAL DE LA REGIONAL BOYACÁ"
-    cargo_oficial = "Profesional G06"
-    cargo_director = "LA SUBDIRECTORA (E)"
+def obtener_datos_centro_y_firmante(codigo_dep):
+    """
+    Devuelve los textos exactos de encabezado, ciudad, centro y jefe que firma según la dependencia.
+    """
+    DATOS_CENTROS = {
+        "9110": {
+            "centro": "Centro de Desarrollo Agropecuario y Agroindustrial de la regional Boyacá",
+            "titulo_encabezado": "SUBDIRECTORA (E) DEL CENTRO DE DESARROLLO AGROPECUARIO Y AGROINDUSTRIAL DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
+            "ciudad": "Duitama",
+            "jefe_nombre": "Enith Yadira Ramírez Camargo",
+            "jefe_cargo": "Subdirectora de Centro (E)"
+        },
+        "9111": {
+            "centro": "Centro Minero de la regional Boyacá",
+            "titulo_encabezado": "SUBDIRECTORA (E) DEL CENTRO MINERO DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
+            "ciudad": "Sogamoso",
+            "jefe_nombre": "Angela María Montoya Castro",
+            "jefe_cargo": "Subdirectora (E) Centro Minero Regional Boyacá"
+        },
+        "9305": {
+            "centro": "Centro de Gestión Administrativa y Fortalecimiento Empresarial de la regional Boyacá",
+            "titulo_encabezado": "SUBDIRECTOR (E) DEL CENTRO DE GESTIÓN ADMINISTRATIVA Y FORTALECIMIENTO EMPRESARIAL DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
+            "ciudad": "Tunja",
+            "jefe_nombre": "Subdirector CGAFE",
+            "jefe_cargo": "Subdirector de Centro (E)"
+        },
+        "9514": {
+            "centro": "Centro Industrial de Mantenimiento y Manufactura de la regional Boyacá",
+            "titulo_encabezado": "SUBDIRECTOR (E) DEL CENTRO INDUSTRIAL DE MANTENIMIENTO Y MANUFACTURA DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
+            "ciudad": "Sogamoso",
+            "jefe_nombre": "Subdirector CIMM",
+            "jefe_cargo": "Subdirector de Centro (E)"
+        },
+        "1010": {
+            "centro": "Despacho Dirección Regional Boyacá",
+            "titulo_encabezado": "DIRECTOR REGIONAL DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
+            "ciudad": "Tunja",
+            "jefe_nombre": "Director Regional",
+            "jefe_cargo": "Director Regional Boyacá"
+        }
+    }
+    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["9110"])
+
+def obtener_cargo_y_dep(nombre_empleado, cedula=None):
+    cargo_oficial = "Profesional G04"
+    codigo_dep = "9110"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
-        return cargo_oficial, centro_oficial.upper(), cargo_director.upper()
+        return cargo_oficial, codigo_dep
 
     lector = PdfReader(MAESTRO_CARGOS)
     nombre_buscar = nombre_empleado.upper().strip()
-    
-    # NOMBRES EN MAYÚSCULAS SOSTENIDAS PARA EL ENCABEZADO
-    NOMBRES_CENTROS_LIMPIOS = {
-        "9110": "CENTRO DE DESARROLLO AGROPECUARIO Y AGROINDUSTRIAL DE LA REGIONAL BOYACÁ",
-        "9111": "CENTRO MINERO DE LA REGIONAL BOYACÁ",
-        "9305": "CENTRO DE GESTIÓN ADMINISTRATIVA Y FORTALECIMIENTO EMPRESARIAL DE LA REGIONAL BOYACÁ",
-        "9514": "CENTRO INDUSTRIAL DE MANTENIMIENTO Y MANUFACTURA DE LA REGIONAL BOYACÁ",
-        "1010": "DESPACHO DIRECCIÓN REGIONAL BOYACÁ"
-    }
-
-    codigo_dep_detectado = "9110"
 
     for pag in lector.pages:
         lineas = pag.extract_text().split("\n")
         for linea in lineas:
             if "DEPENDENCIA:" in linea:
-                for cod in NOMBRES_CENTROS_LIMPIOS.keys():
+                for cod in ["9110", "9111", "9305", "9514", "1010"]:
                     if cod in linea:
-                        codigo_dep_detectado = cod
+                        codigo_dep = cod
             
             coincide_cedula = cedula and cedula in linea
             partes_nom = nombre_buscar.split()
             coincide_nombre = len(partes_nom) >= 2 and partes_nom[0] in linea.upper() and partes_nom[-1] in linea.upper()
             
             if coincide_cedula or coincide_nombre:
-                centro_oficial = NOMBRES_CENTROS_LIMPIOS.get(codigo_dep_detectado, NOMBRES_CENTROS_LIMPIOS["9110"])
-                
-                if codigo_dep_detectado == "1010":
-                    cargo_director = "EL DIRECTOR REGIONAL"
-                else:
-                    cargo_director = "LA SUBDIRECTORA (E)"
-
                 match_cargo = re.search(r"(Instructor\s+G\d+|Profesional\s+G\d+(?:\s*\(e\))?|Tecnico\s+G\d+|Secretaria\s+G\d+|Auxiliar\s+G\d+|Subdirector\s+De\s+Centro|Oficial\s+Mantto[^\d]*G\d+)", linea, re.IGNORECASE)
                 if match_cargo:
                     cargo_oficial = match_cargo.group(1).strip()
-                return cargo_oficial, centro_oficial.upper(), cargo_director.upper()
+                return cargo_oficial, codigo_dep
                 
-    return cargo_oficial, centro_oficial.upper(), cargo_director.upper()
+    return cargo_oficial, codigo_dep
 
 def forzar_formato_una_hoja(doc, dic_reemplazos):
     for section in doc.sections:
-        section.top_margin = Cm(2.2)
-        section.bottom_margin = Cm(2.0)
-        section.left_margin = Cm(2.5)
-        section.right_margin = Cm(2.5)
+        section.top_margin = Cm(2.0)
+        section.bottom_margin = Cm(1.8)
+        section.left_margin = Cm(2.2)
+        section.right_margin = Cm(2.2)
 
     def procesar_parrafo(p):
-        p.paragraph_format.space_before = Pt(2)
-        p.paragraph_format.space_after = Pt(2)
+        p.paragraph_format.space_before = Pt(1)
+        p.paragraph_format.space_after = Pt(1)
 
         for k, v in dic_reemplazos.items():
             if k in p.text:
@@ -218,13 +242,11 @@ else:
 
                 fila_encontrada = None
                 
-                # 1. Buscar por Cédula extraída del PDF
                 if datos_carta['cedula_extraida']:
                     filas = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                     if not filas.empty:
                         fila_encontrada = filas.iloc[0]
                 
-                # 2. Buscar por coincidencia de Nombres y Apellidos
                 if fila_encontrada is None:
                     texto_pdf = datos_carta['texto_completo_pdf']
                     for idx, fila in df_kactus.iterrows():
@@ -239,13 +261,22 @@ else:
                                 break
 
                 if fila_encontrada is None:
-                    st.error("❌ No se pudo identificar al funcionario del PDF en la base de datos Kactus. Verifica que el PDF contenga la cédula o nombres legibles.")
+                    st.error("❌ No se pudo identificar al funcionario del PDF en la base de datos Kactus.")
                 else:
                     cedula_num = int(fila_encontrada['Identificación'])
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
                     nombre_completo = f"{fila_encontrada['Nombre del Empleado']} {fila_encontrada['Apellidos Empleado']}".upper()
                     
-                    cargo, centro, cargo_director = obtener_cargo_y_centro_oficial(nombre_completo, str(cedula_num))
+                    # DETERMINAR SI ES HOMBRE O MUJER PARA 'EL/LA FUNCIONARIO/A'
+                    # Columna 'Sexo' / 'Género' o por el nombre
+                    genero = str(fila_encontrada.get('Sexo', '')).upper()
+                    if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA')):
+                        texto_funcionario = "la funcionaria"
+                    else:
+                        texto_funcionario = "el funcionario"
+
+                    cargo, cod_dep = obtener_cargo_y_dep(nombre_completo, str(cedula_num))
+                    info_centro = obtener_datos_centro_y_firmante(cod_dep)
                     
                     meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
                     
@@ -258,24 +289,32 @@ else:
                     dia_ini_str = f"{f_inicio_obj.day:02d}" if f_inicio_obj.day < 10 else f"{f_inicio_obj.day}"
                     fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_inicio_obj.month - 1]} de {f_inicio_obj.year}"
 
+                    # PERÍODO CAUSADO OBTENIDO DEL EXCEL O PDF
+                    p_ini = datos_carta['periodo_inicio'] if datos_carta['periodo_inicio'] else "18 de noviembre de 2024"
+                    p_fin = datos_carta['periodo_fin'] if datos_carta['periodo_fin'] else "17 de noviembre de 2025"
+
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
 
                     doc = Document(PLANTILLA_WORD)
                     
                     reemplazos = {
-                        "[CARGO_DIRECTOR]": cargo_director,
+                        "[TITULO_DIRECTOR_COMPLETO]": info_centro["titulo_encabezado"],
+                        "[TEXTO_FUNCIONARIO]": texto_funcionario,
                         "[NOMBRE_EMPLEADO]": nombre_completo,
                         "[CEDULA]": cedula_puntos,
                         "[CARGO]": cargo,
-                        "[CENTRO_FORMACION]": centro,
+                        "[CENTRO_FORMACION]": info_centro["centro"],
                         "[RADICADO]": datos_carta['radicado'],
                         "[FECHA_RADICADO]": datos_carta['fecha_radicado'],
                         "[FECHA_INICIO]": fecha_inicio_formateada,
                         "[FECHA_FIN]": fecha_fin_str,
-                        "[PERIODO_INICIO]": datos_carta['periodo_inicio'],
-                        "[PERIODO_FIN]": datos_carta['periodo_fin'],
-                        "[FECHA_HOY]": fecha_hoy_str
+                        "[PERIODO_INICIO]": p_ini,
+                        "[PERIODO_FIN]": p_fin,
+                        "[CIUDAD_CENTRO]": info_centro["ciudad"],
+                        "[FECHA_HOY]": fecha_hoy_str,
+                        "[NOMBRE_JEFE_FIRMA]": info_centro["jefe_nombre"],
+                        "[CARGO_JEFE_FIRMA]": info_centro["jefe_cargo"]
                     }
                     
                     forzar_formato_una_hoja(doc, reemplazos)
@@ -286,18 +325,20 @@ else:
                     doc.save(salida_path)
 
                     st.balloons()
-                    st.success(f"✅ ¡Resolución generada exitosamente!")
+                    st.success(f"✅ ¡Resolución generada con éxito!")
                     
-                    st.markdown("### 📋 Datos de la Resolución Generada:")
-                    st.write(f"👤 **Funcionario:** {nombre_completo}")
-                    st.write(f"🪪 **Cédula:** {cedula_puntos}")
-                    st.write(f"💼 **Cargo:** {cargo}")
-                    st.write(f"🏢 **Centro:** {centro}")
-                    st.write(f"📅 **Período de Disfrute:** Del {fecha_inicio_formateada} al {fecha_fin_str}")
+                    st.markdown("### 📋 Datos Confirmados en la Resolución:")
+                    st.write(f"👤 **Solicitante:** {texto_funcionario.capitalize()} **{nombre_completo}**")
+                    st.write(f"🪪 **Cédula:** {cedula_puntos} | **Cargo:** {cargo}")
+                    st.write(f"🏢 **Centro:** {info_centro['centro']}")
+                    st.write(f"📍 **Lugar de Expedición:** {info_centro['ciudad']}")
+                    st.write(f"✍️ **Firmante:** {info_centro['jefe_nombre']} ({info_centro['jefe_cargo']})")
+                    st.write(f"📅 **Período Causado:** Del {p_ini} al {p_fin}")
+                    st.write(f"🏖️ **Disfrute:** Del {fecha_inicio_formateada} al {fecha_fin_str}")
 
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
-                            label=f"📥 DESCARGAR DOCUMENTO DE {nombre_completo}",
+                            label=f"📥 DESCARGAR RESOLUCIÓN DE {nombre_completo}",
                             data=file_docx,
                             file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
