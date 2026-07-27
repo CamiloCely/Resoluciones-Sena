@@ -49,7 +49,6 @@ if st.sidebar.button("🔄 Reiniciar Memoria / Forzar Limpieza"):
     st.cache_data.clear()
     st.rerun()
 
-# LISTA OFICIAL DE FESTIVOS COLOMBIA 2026
 FESTIVOS_COLOMBIA = [
     datetime.date(2026, 1, 1),   datetime.date(2026, 1, 12),  datetime.date(2026, 3, 23),
     datetime.date(2026, 4, 2),   datetime.date(2026, 4, 3),   datetime.date(2026, 5, 1),
@@ -63,7 +62,6 @@ def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
     fecha_actual = fecha_inicio
     dias_contados = 0
     while dias_contados < dias_habiles:
-        # Contar solo lunes a viernes que no sean festivos
         if fecha_actual.weekday() < 5 and fecha_actual not in FESTIVOS_COLOMBIA:
             dias_contados += 1
         if dias_contados < dias_habiles:
@@ -78,46 +76,55 @@ def extraer_datos_carta(file_bytes):
         if txt:
             texto += txt + "\n"
             
-    # 1. RADICADO
+    # 1. RADICADO (Capta "No: 15-1-2026-001997")
     radicado_match = re.search(r"(?:No:|Radicado|No\.)\s*([\d\-]{10,25})", texto, re.IGNORECASE)
-    radicado = radicado_match.group(1).strip() if radicado_match else "15-1-2026-004250"
+    radicado = radicado_match.group(1).strip() if radicado_match else "15-1-2026-001997"
 
-    # 2. FECHA DEL STICKER DE RADICACIÓN (Formato 24/6/2026 o 24/06/2026)
+    # 2. FECHA DEL STICKER DE RADICACIÓN (ejemplo: 5/03/2026 -> 05 de marzo de 2026)
     meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
+    fecha_rad_str = "05 de marzo de 2026"
     
-    fecha_rad_str = "24 de junio de 2026"
-    
-    # Buscar patrones de fechas cerca del sello de radicación (e.g., 24/6/2026)
     fecha_sticker = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto)
     if fecha_sticker:
         dia_s = int(fecha_sticker.group(1))
         mes_s = int(fecha_sticker.group(2))
         ano_s = fecha_sticker.group(3)
-        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
+        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'marzo')} de {ano_s}"
 
-    # 3. PERÍODO CAUSADO
-    periodo_match = re.search(r"comprendido\s+entre\s+([^\n]+?)\s+y\s+el\s+([^\n]+?)\s+a\s+partir", texto, re.IGNORECASE)
+    # 3. PERÍODO CAUSADO ("del periodo 15 de mayo de 2025 al 14 de mayo de 2026")
+    periodo_match = re.search(r"(?:periodo|período)\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
     if not periodo_match:
         periodo_match = re.search(r"entre\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+y\s+el\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
         
-    p_inicio = periodo_match.group(1).strip() if periodo_match else "01 de marzo de 2025"
-    p_fin = periodo_match.group(2).strip() if periodo_match else "28 de febrero de 2026"
+    p_inicio = periodo_match.group(1).strip() if periodo_match else "15 de mayo de 2025"
+    p_fin = periodo_match.group(2).strip() if periodo_match else "14 de mayo de 2026"
 
-    # 4. FECHA DE DISFRUTE ("a partir del 27 de julio")
+    # 4. FECHA DE DISFRUTE ("a partir del 25 de mayo de 2026")
     meses_nom = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
     disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+\w+(?:\s+de\s+\d{4})?)", texto, re.IGNORECASE)
     
-    fecha_disfrute_obj = datetime.date(2026, 7, 27)
+    fecha_disfrute_obj = datetime.date(2026, 5, 25)
     if disfrute_match:
         raw_disf = disfrute_match.group(1).lower().replace(".", "").strip()
         partes = raw_disf.split()
         d_dia = int(partes[0])
-        d_mes = meses_nom.get(partes[2], 7) if len(partes) >= 3 else 7
+        d_mes = meses_nom.get(partes[2], 5) if len(partes) >= 3 else 5
         d_ano = int(partes[4]) if len(partes) >= 5 else 2026
         fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
 
-    # 5. CÉDULA
-    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", texto, re.IGNORECASE)
+    # 5. BÚSQUEDA EXCLUSIVA DEL SOLICITANTE (Ignorando las líneas con VoBo o Destinatario)
+    lineas_limpias = []
+    ignorar = False
+    for line in texto.split("\n"):
+        if "VOBO" in line.upper() or "VISTO BUENO" in line.upper():
+            ignorar = True # Detener captura de nombres si llegamos a la sección de VoBo
+        if not ignorar and "SEÑOR" not in line.upper() and "COORDINADOR" not in line.upper():
+            lineas_limpias.append(line)
+            
+    texto_solo_solicitante = "\n".join(lineas_limpias).upper()
+
+    # Extraer Cédula si está
+    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", texto_solo_solicitante, re.IGNORECASE)
     cedula_limpia = None
     for c in todas_cedulas:
         num = c.replace(".", "").strip()
@@ -132,7 +139,7 @@ def extraer_datos_carta(file_bytes):
         "periodo_fin": p_fin,
         "fecha_inicio_obj": fecha_disfrute_obj,
         "cedula_extraida": cedula_limpia,
-        "texto_completo_pdf": texto.upper()
+        "texto_solo_solicitante": texto_solo_solicitante
     }
 
 def obtener_datos_centro_y_firmante(codigo_dep):
@@ -162,8 +169,8 @@ def obtener_datos_centro_y_firmante(codigo_dep):
             "centro": "Centro Industrial de Mantenimiento y Manufactura de la regional Boyacá",
             "titulo_encabezado": "SUBDIRECTOR (E) DEL CENTRO INDUSTRIAL DE MANTENIMIENTO Y MANUFACTURA DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
             "ciudad": "Sogamoso",
-            "jefe_nombre": "Subdirector CIMM",
-            "jefe_cargo": "Subdirector de Centro (E)"
+            "jefe_nombre": "Consuelo Alexandra Barrera Coronado",
+            "jefe_cargo": "Subdirectora (E) CIMM"
         },
         "1010": {
             "centro": "Despacho Dirección Regional Boyacá",
@@ -173,11 +180,11 @@ def obtener_datos_centro_y_firmante(codigo_dep):
             "jefe_cargo": "Director Regional Boyacá"
         }
     }
-    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["9111"])
+    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["9514"])
 
 def obtener_cargo_y_dep(nombre_empleado, cedula=None):
-    cargo_oficial = "Profesional G04"
-    codigo_dep = "9111"
+    cargo_oficial = "Profesional G03 (e)"
+    codigo_dep = "9514"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
         return cargo_oficial, codigo_dep
@@ -213,10 +220,6 @@ def reemplazar_respetando_formato(doc, dic_reemplazos):
                 runs_no_img = [r for r in p.runs if not any(tag in r._element.xml for tag in ['w:drawing', 'w:pict', 'a:blip', 'v:shape'])]
                 if runs_no_img:
                     runs_no_img[0].text = full_text
-                    # Remover negrilla si la etiqueta [RESUELVE_TEXTO] se reemplaza
-                    if k == "[RESUELVE_TEXTO]":
-                        for r in runs_no_img:
-                            r.bold = False
                     for r in runs_no_img[1:]:
                         r.text = ""
 
@@ -251,13 +254,15 @@ else:
 
                 fila_encontrada = None
                 
+                # 1. Buscar por Cédula extraída del área del solicitante
                 if datos_carta['cedula_extraida']:
                     filas = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                     if not filas.empty:
                         fila_encontrada = filas.iloc[0]
                 
+                # 2. Buscar por Coincidencia del Solicitante (Ignorando VoBo)
                 if fila_encontrada is None:
-                    texto_pdf = datos_carta['texto_completo_pdf']
+                    texto_solic = datos_carta['texto_solo_solicitante']
                     for idx, fila in df_kactus.iterrows():
                         nom = str(fila['Nombre del Empleado']).strip().upper()
                         ape = str(fila['Apellidos Empleado']).strip().upper()
@@ -265,7 +270,7 @@ else:
                         p_ape = ape.split()[0] if ape else ""
                         
                         if len(p_nom) > 2 and len(p_ape) > 2:
-                            if p_nom in texto_pdf and p_ape in texto_pdf:
+                            if p_nom in texto_solic and p_ape in texto_solic:
                                 fila_encontrada = fila
                                 break
 
@@ -276,8 +281,9 @@ else:
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
                     nombre_completo = f"{fila_encontrada['Nombre del Empleado']} {fila_encontrada['Apellidos Empleado']}".upper()
                     
+                    # Determinar si es hombre o mujer
                     genero = str(fila_encontrada.get('Sexo', '')).upper()
-                    if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA')):
+                    if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
                         texto_funcionario = "la funcionaria"
                         texto_funcionario_a = "a la funcionaria"
                     else:
@@ -333,11 +339,12 @@ else:
                     st.balloons()
                     st.success(f"✅ ¡Resolución generada con éxito!")
                     
-                    st.markdown("### 📋 Datos Confirmados en la Resolución:")
+                    st.markdown("### 📋 Datos Confirmados del Solicitante:")
                     st.write(f"👤 **Solicitante:** {texto_funcionario.capitalize()} **{nombre_completo}**")
                     st.write(f"🔢 **Radicado:** {datos_carta['radicado']} del **{datos_carta['fecha_radicado']}**")
+                    st.write(f"💼 **Cargo:** {cargo} | **Centro:** {info_centro['centro']}")
                     st.write(f"📅 **Período Causado:** Del {datos_carta['periodo_inicio']} al {datos_carta['periodo_fin']}")
-                    st.write(f"🏖️ **Período Disfrute (15 Días Hábiles):** Del {fecha_inicio_formateada} al **{fecha_fin_str}**")
+                    st.write(f"🏖️ **Disfrute (15 Días Hábiles):** Del {fecha_inicio_formateada} al {fecha_fin_str}")
 
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
