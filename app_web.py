@@ -49,6 +49,7 @@ if st.sidebar.button("🔄 Reiniciar Memoria / Forzar Limpieza"):
     st.cache_data.clear()
     st.rerun()
 
+# LISTA OFICIAL DE FESTIVOS COLOMBIA 2026
 FESTIVOS_COLOMBIA = [
     datetime.date(2026, 1, 1),   datetime.date(2026, 1, 12),  datetime.date(2026, 3, 23),
     datetime.date(2026, 4, 2),   datetime.date(2026, 4, 3),   datetime.date(2026, 5, 1),
@@ -62,6 +63,7 @@ def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
     fecha_actual = fecha_inicio
     dias_contados = 0
     while dias_contados < dias_habiles:
+        # Contar solo lunes a viernes que no sean festivos
         if fecha_actual.weekday() < 5 and fecha_actual not in FESTIVOS_COLOMBIA:
             dias_contados += 1
         if dias_contados < dias_habiles:
@@ -76,29 +78,24 @@ def extraer_datos_carta(file_bytes):
         if txt:
             texto += txt + "\n"
             
-    # 1. RADICADO (Capta "No: 15-1-2026-004250")
+    # 1. RADICADO
     radicado_match = re.search(r"(?:No:|Radicado|No\.)\s*([\d\-]{10,25})", texto, re.IGNORECASE)
     radicado = radicado_match.group(1).strip() if radicado_match else "15-1-2026-004250"
 
-    # 2. FECHA DE RADICADO (Capta fechas debajo del radicado o en la carta)
-    fecha_rad_match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", texto)
-    if not fecha_rad_match:
-        fecha_rad_match = re.search(r"(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
+    # 2. FECHA DEL STICKER DE RADICACIÓN (Formato 24/6/2026 o 24/06/2026)
+    meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
     
-    meses = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
-
     fecha_rad_str = "24 de junio de 2026"
-    if fecha_rad_match:
-        f_raw = fecha_rad_match.group(1).strip()
-        if "/" in f_raw:
-            p = f_raw.split("/")
-            m_num = int(p[1])
-            meses_inv = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
-            fecha_rad_str = f"{p[0]} de {meses_inv.get(m_num, 'junio')} de {p[2]}"
-        else:
-            fecha_rad_str = f_raw
+    
+    # Buscar patrones de fechas cerca del sello de radicación (e.g., 24/6/2026)
+    fecha_sticker = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto)
+    if fecha_sticker:
+        dia_s = int(fecha_sticker.group(1))
+        mes_s = int(fecha_sticker.group(2))
+        ano_s = fecha_sticker.group(3)
+        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
 
-    # 3. PERÍODO CAUSADO ("entre 01 de marzo de 2025 y el 28 de febrero de 2026")
+    # 3. PERÍODO CAUSADO
     periodo_match = re.search(r"comprendido\s+entre\s+([^\n]+?)\s+y\s+el\s+([^\n]+?)\s+a\s+partir", texto, re.IGNORECASE)
     if not periodo_match:
         periodo_match = re.search(r"entre\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+y\s+el\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
@@ -107,6 +104,7 @@ def extraer_datos_carta(file_bytes):
     p_fin = periodo_match.group(2).strip() if periodo_match else "28 de febrero de 2026"
 
     # 4. FECHA DE DISFRUTE ("a partir del 27 de julio")
+    meses_nom = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
     disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+\w+(?:\s+de\s+\d{4})?)", texto, re.IGNORECASE)
     
     fecha_disfrute_obj = datetime.date(2026, 7, 27)
@@ -114,7 +112,7 @@ def extraer_datos_carta(file_bytes):
         raw_disf = disfrute_match.group(1).lower().replace(".", "").strip()
         partes = raw_disf.split()
         d_dia = int(partes[0])
-        d_mes = meses.get(partes[2], 7) if len(partes) >= 3 else 7
+        d_mes = meses_nom.get(partes[2], 7) if len(partes) >= 3 else 7
         d_ano = int(partes[4]) if len(partes) >= 5 else 2026
         fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
 
@@ -215,6 +213,10 @@ def reemplazar_respetando_formato(doc, dic_reemplazos):
                 runs_no_img = [r for r in p.runs if not any(tag in r._element.xml for tag in ['w:drawing', 'w:pict', 'a:blip', 'v:shape'])]
                 if runs_no_img:
                     runs_no_img[0].text = full_text
+                    # Remover negrilla si la etiqueta [RESUELVE_TEXTO] se reemplaza
+                    if k == "[RESUELVE_TEXTO]":
+                        for r in runs_no_img:
+                            r.bold = False
                     for r in runs_no_img[1:]:
                         r.text = ""
 
@@ -274,7 +276,6 @@ else:
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
                     nombre_completo = f"{fila_encontrada['Nombre del Empleado']} {fila_encontrada['Apellidos Empleado']}".upper()
                     
-                    # DETERMINAR GÉNERO CORRECTO PARA AMBOS PÁRRAFOS
                     genero = str(fila_encontrada.get('Sexo', '')).upper()
                     if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA')):
                         texto_funcionario = "la funcionaria"
@@ -332,11 +333,11 @@ else:
                     st.balloons()
                     st.success(f"✅ ¡Resolución generada con éxito!")
                     
-                    st.markdown("### 📋 Datos Extraídos e Inserción Exacta:")
+                    st.markdown("### 📋 Datos Confirmados en la Resolución:")
                     st.write(f"👤 **Solicitante:** {texto_funcionario.capitalize()} **{nombre_completo}**")
-                    st.write(f"🔢 **Radicado:** {datos_carta['radicado']} del {datos_carta['fecha_radicado']}")
+                    st.write(f"🔢 **Radicado:** {datos_carta['radicado']} del **{datos_carta['fecha_radicado']}**")
                     st.write(f"📅 **Período Causado:** Del {datos_carta['periodo_inicio']} al {datos_carta['periodo_fin']}")
-                    st.write(f"🏖️ **Período Disfrute (15 Días Hábiles):** Del {fecha_inicio_formateada} al {fecha_fin_str}")
+                    st.write(f"🏖️ **Período Disfrute (15 Días Hábiles):** Del {fecha_inicio_formateada} al **{fecha_fin_str}**")
 
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
