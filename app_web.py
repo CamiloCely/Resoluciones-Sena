@@ -76,11 +76,11 @@ def extraer_datos_carta(file_bytes):
         if txt:
             texto += txt + "\n"
             
-    # 1. RADICADO (Capta "No: 15-1-2026-001997")
+    # 1. RADICADO
     radicado_match = re.search(r"(?:No:|Radicado|No\.)\s*([\d\-]{10,25})", texto, re.IGNORECASE)
     radicado = radicado_match.group(1).strip() if radicado_match else "15-1-2026-001997"
 
-    # 2. FECHA DEL STICKER DE RADICACIÓN (ejemplo: 5/03/2026 -> 05 de marzo de 2026)
+    # 2. FECHA DE RADICACIÓN
     meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
     fecha_rad_str = "05 de marzo de 2026"
     
@@ -91,7 +91,7 @@ def extraer_datos_carta(file_bytes):
         ano_s = fecha_sticker.group(3)
         fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'marzo')} de {ano_s}"
 
-    # 3. PERÍODO CAUSADO ("del periodo 15 de mayo de 2025 al 14 de mayo de 2026")
+    # 3. PERÍODO CAUSADO
     periodo_match = re.search(r"(?:periodo|período)\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
     if not periodo_match:
         periodo_match = re.search(r"entre\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+y\s+el\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
@@ -99,7 +99,7 @@ def extraer_datos_carta(file_bytes):
     p_inicio = periodo_match.group(1).strip() if periodo_match else "15 de mayo de 2025"
     p_fin = periodo_match.group(2).strip() if periodo_match else "14 de mayo de 2026"
 
-    # 4. FECHA DE DISFRUTE ("a partir del 25 de mayo de 2026")
+    # 4. FECHA DE DISFRUTE
     meses_nom = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
     disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+\w+(?:\s+de\s+\d{4})?)", texto, re.IGNORECASE)
     
@@ -112,19 +112,27 @@ def extraer_datos_carta(file_bytes):
         d_ano = int(partes[4]) if len(partes) >= 5 else 2026
         fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
 
-    # 5. BÚSQUEDA EXCLUSIVA DEL SOLICITANTE (Ignorando las líneas con VoBo o Destinatario)
-    lineas_limpias = []
-    ignorar = False
-    for line in texto.split("\n"):
-        if "VOBO" in line.upper() or "VISTO BUENO" in line.upper():
-            ignorar = True # Detener captura de nombres si llegamos a la sección de VoBo
-        if not ignorar and "SEÑOR" not in line.upper() and "COORDINADOR" not in line.upper():
-            lineas_limpias.append(line)
-            
-    texto_solo_solicitante = "\n".join(lineas_limpias).upper()
+    # 5. AISLAR EL TEXTO EXCLUSIVO DEL REMITENTE (Cortando antes del VoBo o Evaluación)
+    texto_mayus = texto.upper()
+    pos_vobo = texto_mayus.find("VOBO")
+    if pos_vobo != -1:
+        texto_remitente = texto_mayus[:pos_vobo]
+    else:
+        pos_visto = texto_mayus.find("VISTO BUENO")
+        if pos_visto != -1:
+            texto_remitente = texto_mayus[:pos_visto]
+        else:
+            texto_remitente = texto_mayus
 
-    # Extraer Cédula si está
-    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", texto_solo_solicitante, re.IGNORECASE)
+    # Extraer la firma que esté entre Cordialmente / Atentamente y la fecha final
+    pos_cordialmente = texto_remitente.find("CORDIALMENTE")
+    if pos_cordialmente != -1:
+        bloque_firma = texto_remitente[pos_cordialmente:]
+    else:
+        bloque_firma = texto_remitente
+
+    # Buscar Cédula en el bloque del remitente
+    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", bloque_firma, re.IGNORECASE)
     cedula_limpia = None
     for c in todas_cedulas:
         num = c.replace(".", "").strip()
@@ -139,7 +147,8 @@ def extraer_datos_carta(file_bytes):
         "periodo_fin": p_fin,
         "fecha_inicio_obj": fecha_disfrute_obj,
         "cedula_extraida": cedula_limpia,
-        "texto_solo_solicitante": texto_solo_solicitante
+        "bloque_firma": bloque_firma,
+        "texto_remitente": texto_remitente
     }
 
 def obtener_datos_centro_y_firmante(codigo_dep):
@@ -245,7 +254,7 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Buscando coincidencia exacta en la base de datos Kactus..."):
+            with st.spinner("Buscando coincidencia exacta del remitente en la base Kactus..."):
                 datos_carta = extraer_datos_carta(archivo_pdf)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
@@ -254,15 +263,30 @@ else:
 
                 fila_encontrada = None
                 
-                # 1. Buscar por Cédula extraída del área del solicitante
+                # 1. Buscar por Cédula en la sección del remitente
                 if datos_carta['cedula_extraida']:
                     filas = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                     if not filas.empty:
                         fila_encontrada = filas.iloc[0]
                 
-                # 2. Buscar por Coincidencia del Solicitante (Ignorando VoBo)
+                # 2. Buscar coincidencias en el bloque de firma exclusivo del remitente (IGNORANDO VOBO)
                 if fila_encontrada is None:
-                    texto_solic = datos_carta['texto_solo_solicitante']
+                    bloque = datos_carta['bloque_firma']
+                    for idx, fila in df_kactus.iterrows():
+                        nom = str(fila['Nombre del Empleado']).strip().upper()
+                        ape = str(fila['Apellidos Empleado']).strip().upper()
+                        p_nom = nom.split()[0] if nom else ""
+                        p_ape = ape.split()[0] if ape else ""
+                        
+                        # Evitar coincidencia con el VoBo o evaluador
+                        if len(p_nom) > 2 and len(p_ape) > 2:
+                            if p_nom in bloque and p_ape in bloque:
+                                fila_encontrada = fila
+                                break
+
+                # 3. Si aún no lo encuentra en la firma, buscar en el texto limpio sin VoBo
+                if fila_encontrada is None:
+                    texto_rem = datos_carta['texto_remitente']
                     for idx, fila in df_kactus.iterrows():
                         nom = str(fila['Nombre del Empleado']).strip().upper()
                         ape = str(fila['Apellidos Empleado']).strip().upper()
@@ -270,18 +294,17 @@ else:
                         p_ape = ape.split()[0] if ape else ""
                         
                         if len(p_nom) > 2 and len(p_ape) > 2:
-                            if p_nom in texto_solic and p_ape in texto_solic:
+                            if p_nom in texto_rem and p_ape in texto_rem:
                                 fila_encontrada = fila
                                 break
 
                 if fila_encontrada is None:
-                    st.error("❌ No se pudo identificar al funcionario del PDF en la base de datos Kactus.")
+                    st.error("❌ No se pudo identificar al remitente del PDF en la base Kactus.")
                 else:
                     cedula_num = int(fila_encontrada['Identificación'])
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
                     nombre_completo = f"{fila_encontrada['Nombre del Empleado']} {fila_encontrada['Apellidos Empleado']}".upper()
                     
-                    # Determinar si es hombre o mujer
                     genero = str(fila_encontrada.get('Sexo', '')).upper()
                     if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
                         texto_funcionario = "la funcionaria"
@@ -302,7 +325,7 @@ else:
                     fecha_fin_str = f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
                     
                     dia_ini_str = f"{f_ini_obj.day:02d}" if f_ini_obj.day < 10 else f"{f_ini_obj.day}"
-                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj.month - 1]} de {f_ini_obj.year}"
+                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj.month - 1]} de {f_inicio_obj.year}"
 
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
