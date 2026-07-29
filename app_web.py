@@ -76,59 +76,49 @@ def extraer_datos_carta(file_bytes):
         if txt:
             texto += txt + "\n"
             
-    # 1. RADICADO
-    radicado_match = re.search(r"(?:No:|Radicado|No\.)\s*([\d\-]{10,25})", texto, re.IGNORECASE)
-    radicado = radicado_match.group(1).strip() if radicado_match else "15-1-2026-001997"
-
-    # 2. FECHA DE RADICACIÓN
     meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
-    fecha_rad_str = "05 de marzo de 2026"
-    
+    meses_nom = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
+
+    # 1. RADICADO DINÁMICO EXACTO
+    radicado_match = re.search(r"(?:No:|Radicado|No\.)\s*([\d\-]{10,25})", texto, re.IGNORECASE)
+    radicado = radicado_match.group(1).strip() if radicado_match else "SIN RADICADO"
+
+    # 2. FECHA DE RADICACIÓN DINÁMICA (Búsqueda en sticker)
+    fecha_rad_str = "FECHA SIN DETECTAR"
     fecha_sticker = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto)
     if fecha_sticker:
         dia_s = int(fecha_sticker.group(1))
         mes_s = int(fecha_sticker.group(2))
         ano_s = fecha_sticker.group(3)
-        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'marzo')} de {ano_s}"
+        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'enero')} de {ano_s}"
+    else:
+        fecha_txt = re.search(r"(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
+        if fecha_txt:
+            fecha_rad_str = fecha_txt.group(1).strip()
 
-    # 3. PERÍODO CAUSADO
-    periodo_match = re.search(r"(?:periodo|período)\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-    if not periodo_match:
-        periodo_match = re.search(r"entre\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+y\s+el\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-        
-    p_inicio = periodo_match.group(1).strip() if periodo_match else "15 de mayo de 2025"
-    p_fin = periodo_match.group(2).strip() if periodo_match else "14 de mayo de 2026"
+    # 3. PERÍODO CAUSADO DINÁMICO DE LA CARTA
+    periodo_match = re.search(r"(?:periodo|período)\s+(?:comprendido\s+)?(?:entre\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+(?:al|y\s+el)\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
+    p_inicio = periodo_match.group(1).strip() if periodo_match else None
+    p_fin = periodo_match.group(2).strip() if periodo_match else None
 
     # 4. FECHA DE DISFRUTE
-    meses_nom = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
     disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+\w+(?:\s+de\s+\d{4})?)", texto, re.IGNORECASE)
-    
-    fecha_disfrute_obj = datetime.date(2026, 5, 25)
+    fecha_disfrute_obj = datetime.date.today()
     if disfrute_match:
         raw_disf = disfrute_match.group(1).lower().replace(".", "").strip()
         partes = raw_disf.split()
         d_dia = int(partes[0])
-        d_mes = meses_nom.get(partes[2], 5) if len(partes) >= 3 else 5
-        d_ano = int(partes[4]) if len(partes) >= 5 else 2026
+        d_mes = meses_nom.get(partes[2], 1) if len(partes) >= 3 else 1
+        d_ano = int(partes[4]) if len(partes) >= 5 else datetime.date.today().year
         fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
 
-    # 5. AISLAR EL TEXTO EXCLUSIVO DEL REMITENTE
+    # 5. AISLAR REMITENTE
     texto_mayus = texto.upper()
     pos_vobo = texto_mayus.find("VOBO")
-    if pos_vobo != -1:
-        texto_remitente = texto_mayus[:pos_vobo]
-    else:
-        pos_visto = texto_mayus.find("VISTO BUENO")
-        if pos_visto != -1:
-            texto_remitente = texto_mayus[:pos_visto]
-        else:
-            texto_remitente = texto_mayus
+    texto_remitente = texto_mayus[:pos_vobo] if pos_vobo != -1 else texto_mayus
 
     pos_cordialmente = texto_remitente.find("CORDIALMENTE")
-    if pos_cordialmente != -1:
-        bloque_firma = texto_remitente[pos_cordialmente:]
-    else:
-        bloque_firma = texto_remitente
+    bloque_firma = texto_remitente[pos_cordialmente:] if pos_cordialmente != -1 else texto_remitente
 
     todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", bloque_firma, re.IGNORECASE)
     cedula_limpia = None
@@ -190,7 +180,7 @@ def obtener_datos_centro_y_firmante(codigo_dep):
     return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["9514"])
 
 def obtener_cargo_y_dep(nombre_empleado, cedula=None):
-    cargo_oficial = "Profesional G03 (e)"
+    cargo_oficial = "Profesional G06"
     codigo_dep = "9514"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
@@ -227,6 +217,10 @@ def reemplazar_respetando_formato(doc, dic_reemplazos):
                 runs_no_img = [r for r in p.runs if not any(tag in r._element.xml for tag in ['w:drawing', 'w:pict', 'a:blip', 'v:shape'])]
                 if runs_no_img:
                     runs_no_img[0].text = full_text
+                    # Desactivar negrilla completa en párrafos del cuerpo si no es título
+                    if "Artículo" in p.text or "Conceder" in p.text:
+                        for r in runs_no_img:
+                            r.bold = False
                     for r in runs_no_img[1:]:
                         r.text = ""
 
@@ -261,13 +255,11 @@ else:
 
                 fila_encontrada = None
                 
-                # 1. Buscar por Cédula en la sección del remitente
                 if datos_carta['cedula_extraida']:
                     filas = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                     if not filas.empty:
                         fila_encontrada = filas.iloc[0]
                 
-                # 2. Buscar coincidencias en el bloque de firma exclusivo del remitente (IGNORANDO VOBO)
                 if fila_encontrada is None:
                     bloque = datos_carta['bloque_firma']
                     for idx, fila in df_kactus.iterrows():
@@ -281,7 +273,6 @@ else:
                                 fila_encontrada = fila
                                 break
 
-                # 3. Si aún no lo encuentra en la firma, buscar en el texto limpio sin VoBo
                 if fila_encontrada is None:
                     texto_rem = datos_carta['texto_remitente']
                     for idx, fila in df_kactus.iterrows():
@@ -303,7 +294,7 @@ else:
                     nombre_completo = f"{fila_encontrada['Nombre del Empleado']} {fila_encontrada['Apellidos Empleado']}".upper()
                     
                     genero = str(fila_encontrada.get('Sexo', '')).upper()
-                    if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
+                    if 'F' in genero or nombre_completo.startswith(('SANDRA', 'CAROLINA', 'BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
                         texto_funcionario = "la funcionaria"
                         texto_funcionario_a = "a la funcionaria"
                     else:
@@ -324,6 +315,9 @@ else:
                     dia_ini_str = f"{f_ini_obj.day:02d}" if f_ini_obj.day < 10 else f"{f_ini_obj.day}"
                     fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj.month - 1]} de {f_ini_obj.year}"
 
+                    p_ini = datos_carta['periodo_inicio'] if datos_carta['periodo_inicio'] else "01 de enero de 2025"
+                    p_fin = datos_carta['periodo_fin'] if datos_carta['periodo_fin'] else "31 de diciembre de 2025"
+
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
 
@@ -341,8 +335,8 @@ else:
                         "[FECHA_RADICADO]": datos_carta['fecha_radicado'],
                         "[FECHA_INICIO]": fecha_inicio_formateada,
                         "[FECHA_FIN]": fecha_fin_str,
-                        "[PERIODO_INICIO]": datos_carta['periodo_inicio'],
-                        "[PERIODO_FIN]": datos_carta['periodo_fin'],
+                        "[PERIODO_INICIO]": p_ini,
+                        "[PERIODO_FIN]": p_fin,
                         "[CIUDAD_CENTRO]": info_centro["ciudad"],
                         "[FECHA_HOY]": fecha_hoy_str,
                         "[NOMBRE_JEFE_FIRMA]": info_centro["jefe_nombre"],
@@ -361,9 +355,9 @@ else:
                     
                     st.markdown("### 📋 Datos Confirmados del Solicitante:")
                     st.write(f"👤 **Solicitante:** {texto_funcionario.capitalize()} **{nombre_completo}**")
-                    st.write(f"🔢 **Radicado:** {datos_carta['radicado']} del **{datos_carta['fecha_radicado']}**")
+                    st.write(f"🔢 **Radicado Extraído:** {datos_carta['radicado']} del **{datos_carta['fecha_radicado']}**")
                     st.write(f"💼 **Cargo:** {cargo} | **Centro:** {info_centro['centro']}")
-                    st.write(f"📅 **Período Causado:** Del {datos_carta['periodo_inicio']} al {datos_carta['periodo_fin']}")
+                    st.write(f"📅 **Período Causado Extraído:** Del {p_ini} al {p_fin}")
                     st.write(f"🏖️ **Disfrute (15 Días Hábiles):** Del {fecha_inicio_formateada} al {fecha_fin_str}")
 
                     with open(salida_path, "rb") as file_docx:
