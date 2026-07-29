@@ -112,7 +112,7 @@ def extraer_datos_carta(file_bytes):
         d_ano = int(partes[4]) if len(partes) >= 5 else 2026
         fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
 
-    # 5. AISLAR EL TEXTO EXCLUSIVO DEL REMITENTE (Cortando antes del VoBo o Evaluación)
+    # 5. AISLAR EL TEXTO EXCLUSIVO DEL REMITENTE
     texto_mayus = texto.upper()
     pos_vobo = texto_mayus.find("VOBO")
     if pos_vobo != -1:
@@ -124,14 +124,12 @@ def extraer_datos_carta(file_bytes):
         else:
             texto_remitente = texto_mayus
 
-    # Extraer la firma que esté entre Cordialmente / Atentamente y la fecha final
     pos_cordialmente = texto_remitente.find("CORDIALMENTE")
     if pos_cordialmente != -1:
         bloque_firma = texto_remitente[pos_cordialmente:]
     else:
         bloque_firma = texto_remitente
 
-    # Buscar Cédula en el bloque del remitente
     todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", bloque_firma, re.IGNORECASE)
     cedula_limpia = None
     for c in todas_cedulas:
@@ -278,7 +276,6 @@ else:
                         p_nom = nom.split()[0] if nom else ""
                         p_ape = ape.split()[0] if ape else ""
                         
-                        # Evitar coincidencia con el VoBo o evaluador
                         if len(p_nom) > 2 and len(p_ape) > 2:
                             if p_nom in bloque and p_ape in bloque:
                                 fila_encontrada = fila
@@ -325,7 +322,7 @@ else:
                     fecha_fin_str = f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
                     
                     dia_ini_str = f"{f_ini_obj.day:02d}" if f_ini_obj.day < 10 else f"{f_ini_obj.day}"
-                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj.month - 1]} de {f_inicio_obj.year}"
+                    fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj.month - 1]} de {f_ini_obj.year}"
 
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
