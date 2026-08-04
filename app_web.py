@@ -72,14 +72,19 @@ def convertir_fecha_num_a_texto(fecha_str):
     meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
     partes = fecha_str.replace("-", "/").split("/")
     if len(partes) == 3:
-        dia = int(partes[0])
-        mes = int(partes[1])
-        ano = partes[2]
-        return f"{dia:02d} de {meses_dict.get(mes, 'enero')} de {ano}"
+        try:
+            dia = int(partes[0])
+            mes = int(partes[1])
+            ano = partes[2]
+            return f"{dia:02d} de {meses_dict.get(mes, 'enero')} de {ano}"
+        except:
+            return fecha_str
     return fecha_str
 
-def extraer_datos_pdf_dinamico(file_bytes):
-    lector = PdfReader(file_bytes)
+def extraer_datos_pdf_dinamico(file_stream):
+    # REINICIAR PUNTERO DEL ARCHIVO
+    file_stream.seek(0)
+    lector = PdfReader(file_stream)
     texto = ""
     for pag in lector.pages:
         txt = pag.extract_text()
@@ -95,10 +100,10 @@ def extraer_datos_pdf_dinamico(file_bytes):
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{5,8})", texto_unificado)
     if not rad_match:
         rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
-    radicado = rad_match.group(1).strip() if rad_match else "15-1-2026-004301"
+    radicado = rad_match.group(1).strip() if rad_match else ""
 
     # 2. FECHA DE RADICADO DEL STICKER
-    fecha_rad_str = "26 de junio de 2026"
+    fecha_rad_str = ""
     sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
     if sticker_match:
         dia_s = int(sticker_match.group(1))
@@ -107,20 +112,31 @@ def extraer_datos_pdf_dinamico(file_bytes):
         fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
 
     # 3. PERÍODO CAUSADO
-    p_inicio, p_fin = "29 de septiembre de 2024", "29 de septiembre de 2025"
+    p_inicio, p_fin = "", ""
     per_num = re.search(r"laborado\s+(?:del|desde\s+el)\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s+(?:al|hasta\s+el)\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})", texto_unificado, re.IGNORECASE)
     if per_num:
         p_inicio = convertir_fecha_num_a_texto(per_num.group(1))
         p_fin = convertir_fecha_num_a_texto(per_num.group(2))
+    else:
+        patron_fechas = re.findall(r"(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
+        if len(patron_fechas) >= 2:
+            p_inicio = patron_fechas[0]
+            p_fin = patron_fechas[1]
 
     # 4. FECHA DE DISFRUTE
-    fecha_disfrute_obj = datetime.date(2026, 8, 10)
-    disfrute_rango = re.search(r"entre\s+el\s+(\d{1,2})\s+y\s+el\s+\d{1,2}\s+de\s+([a-zA-Z]+)\s+de\s+(\d{4})", texto_unificado, re.IGNORECASE)
+    fecha_disfrute_obj = datetime.date.today()
+    fecha_fin_directa = ""
+
+    disfrute_rango = re.search(r"entre\s+el\s+(\d{1,2})\s+y\s+el\s+(\d{1,2})\s+de\s+([a-zA-Z]+)\s+de\s+(\d{4})", texto_unificado, re.IGNORECASE)
     if disfrute_rango:
         d_dia = int(disfrute_rango.group(1))
-        d_mes = meses_nom.get(disfrute_rango.group(2).lower(), 8)
-        d_ano = int(disfrute_rango.group(3))
+        f_dia = int(disfrute_rango.group(2))
+        d_mes_nom = disfrute_rango.group(3).lower()
+        d_mes = meses_nom.get(d_mes_nom, datetime.date.today().month)
+        d_ano = int(disfrute_rango.group(4))
+        
         fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
+        fecha_fin_directa = f"{f_dia:02d} de {d_mes_nom} de {d_ano}"
 
     return {
         "radicado": radicado,
@@ -128,6 +144,7 @@ def extraer_datos_pdf_dinamico(file_bytes):
         "periodo_inicio": p_inicio,
         "periodo_fin": p_fin,
         "fecha_inicio_obj": fecha_disfrute_obj,
+        "fecha_fin_override": fecha_fin_directa,
         "texto_unificado": texto_unificado.upper()
     }
 
@@ -231,9 +248,9 @@ else:
     archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
-        # SI SE SUBE UN NUEVO ARCHIVO, SE REINICIAN LOS DATOS DE LA SESIÓN
-        if 'nombre_archivo_cargado' not in st.session_state or st.session_state['nombre_archivo_cargado'] != archivo_pdf.name:
-            st.session_state['nombre_archivo_cargado'] = archivo_pdf.name
+        # DETECTAR SI ES UN ARCHIVO NUEVO Y REINICIAR MEMORIA
+        if 'ultimo_archivo_cargado' not in st.session_state or st.session_state['ultimo_archivo_cargado'] != archivo_pdf.name:
+            st.session_state['ultimo_archivo_cargado'] = archivo_pdf.name
             st.session_state['timestamp_carga'] = str(time.time())
             st.session_state['datos_carta'] = extraer_datos_pdf_dinamico(archivo_pdf)
 
@@ -253,19 +270,20 @@ else:
         OPCION_NEUTRA = "--- SELECCIONE EL FUNCIONARIO ---"
         lista_opciones = [OPCION_NEUTRA] + lista_funcionarios
 
-        # BUSCAR COINCIDENCIAS AUTOMÁTICAS
+        # ALGORITMO DE COINCIDENCIA DE NOMBRES
         indice_sugerido = 0
         texto = datos_carta['texto_unificado']
-        
-        for idx, nom in enumerate(lista_funcionarios, start=1):
-            partes = [p for p in nom.split() if len(p) > 2]
-            coincidencias = sum(1 for p in partes if p in texto)
-            if coincidencias >= 2:
-                if not any(excl in nom for excl in ["ENITH", "NIDIA", "GUSTAVO", "DIRECTOR", "COORDINADOR"]):
-                    indice_sugerido = idx
-                    break
 
-        st.success(f"📄 Carta '{archivo_pdf.name}' cargada correctamente.")
+        if texto:
+            for idx, nom in enumerate(lista_funcionarios, start=1):
+                partes = [p for p in nom.split() if len(p) > 2]
+                coincidencias = sum(1 for p in partes if p in texto)
+                if coincidencias >= 2:
+                    if not any(excl in nom for excl in ["ENITH", "NIDIA", "GUSTAVO", "DIRECTOR", "COORDINADOR"]):
+                        indice_sugerido = idx
+                        break
+
+        st.success(f"📄 Carta '{archivo_pdf.name}' cargada.")
         st.markdown("### 👤 Confirmación del Solicitante:")
         
         solicitante_elegido = st.selectbox(
@@ -289,7 +307,7 @@ else:
         st.markdown("---")
 
         if solicitante_elegido == OPCION_NEUTRA:
-            st.warning("⚠️ Selecciona el funcionario solicitante en la lista desplegable superior para poder generar la resolución.")
+            st.warning("⚠️ Selecciona el funcionario solicitante en el menú desplegable de arriba para continuar.")
         else:
             fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
             cedula_num = int(fila_encontrada['Identificación'])
@@ -311,9 +329,9 @@ else:
                 meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
                 
                 fecha_fin_obj = calcular_fecha_fin(f_ini_obj_final, 15)
-                
                 dia_fin_str = f"{fecha_fin_obj.day:02d}" if fecha_fin_obj.day < 10 else f"{fecha_fin_obj.day}"
-                fecha_fin_str = f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
+                
+                fecha_fin_str = datos_carta.get('fecha_fin_override') if datos_carta.get('fecha_fin_override') else f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
                 
                 dia_ini_str = f"{f_ini_obj_final.day:02d}" if f_ini_obj_final.day < 10 else f"{f_ini_obj_final.day}"
                 fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
