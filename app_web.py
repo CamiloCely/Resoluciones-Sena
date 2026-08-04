@@ -79,25 +79,39 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
 
     texto_unificado = " ".join(texto.split())
 
-    # 1. RADICADO (Texto del PDF o Nombre del Archivo si el sello es una imagen)
+    # 1. RADICADO (Texto PDF o Nombre de archivo)
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", texto_unificado)
     if not rad_match:
         rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
-    
-    # Si no lo halla en el texto, buscar en el nombre del archivo PDF subido
     if not rad_match and filename_pdf:
         rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", filename_pdf)
 
     radicado = rad_match.group(1).strip() if rad_match else ""
 
-    # 2. FECHA DEL STICKER DE RADICACIÓN
+    # 2. FECHA DE RADICACIÓN MULTINIVEL
     fecha_rad_str = ""
-    sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
-    if sticker_match:
-        dia_s = int(sticker_match.group(1))
-        mes_s = int(sticker_match.group(2))
-        ano_s = sticker_match.group(3)
-        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
+    
+    # Nivel A: Buscar fecha redactada en encabezado (ej: "09 de junio de 2026" o "9 de junio de 2026")
+    match_fecha_txt = re.search(r"(\d{1,2})\s+de\s+([a-zA-Z]+)\s+de\s+(\d{4})", texto_unificado, re.IGNORECASE)
+    if match_fecha_txt:
+        d_txt = int(match_fecha_txt.group(1))
+        m_txt = match_fecha_txt.group(2).lower()
+        a_txt = match_fecha_txt.group(3)
+        fecha_rad_str = f"{d_txt:02d} de {m_txt} de {a_txt}"
+
+    # Nivel B: Buscar formato numérico en sticker (ej: "09/06/2026" o "09-06-2026")
+    if not fecha_rad_str:
+        sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
+        if sticker_match:
+            dia_s = int(sticker_match.group(1))
+            mes_s = int(sticker_match.group(2))
+            ano_s = sticker_match.group(3)
+            fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
+
+    # Nivel C: Fallback a la fecha actual si no detecta fecha en la carta
+    if not fecha_rad_str:
+        hoy_temp = datetime.date.today()
+        fecha_rad_str = f"{hoy_temp.day:02d} de {meses_dict.get(hoy_temp.month, 'junio')} de {hoy_temp.year}"
 
     # 3. CÉDULAS
     todas_cedulas = re.findall(r"(\d{7,10})", texto_unificado)
