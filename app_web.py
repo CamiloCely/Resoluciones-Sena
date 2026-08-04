@@ -7,7 +7,6 @@ from pypdf import PdfReader
 from docx import Document
 import streamlit as st
 
-# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
     page_title="Generador de Resoluciones SENA",
     page_icon="🏛️",
@@ -44,9 +43,8 @@ PLANTILLA_WORD = os.path.join(BASE_DIR, archivos_word[0]) if archivos_word else 
 archivos_pdf_maestro = [f for f in os.listdir(BASE_DIR) if "MAESTRO" in f.upper() and f.lower().endswith('.pdf')]
 MAESTRO_CARGOS = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else (os.path.join(BASE_DIR, archivos_pdf_maestro[0]) if archivos_pdf_maestro else None)
 
-if st.sidebar.button("🔄 Reiniciar Memoria / Limpiar Pantalla"):
+if st.sidebar.button("🔄 Reiniciar Memoria / Forzar Limpieza"):
     st.cache_data.clear()
-    st.session_state.clear()
     st.rerun()
 
 FESTIVOS_COLOMBIA = [
@@ -68,23 +66,8 @@ def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
             fecha_actual += datetime.timedelta(days=1)
     return fecha_actual
 
-def convertir_fecha_num_a_texto(fecha_str):
-    meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
-    partes = fecha_str.replace("-", "/").split("/")
-    if len(partes) == 3:
-        try:
-            dia = int(partes[0])
-            mes = int(partes[1])
-            ano = partes[2]
-            return f"{dia:02d} de {meses_dict.get(mes, 'enero')} de {ano}"
-        except:
-            return fecha_str
-    return fecha_str
-
-def extraer_datos_pdf_dinamico(file_stream):
-    # REINICIAR PUNTERO DEL ARCHIVO
-    file_stream.seek(0)
-    lector = PdfReader(file_stream)
+def extraer_datos_pdf(file_bytes):
+    lector = PdfReader(file_bytes)
     texto = ""
     for pag in lector.pages:
         txt = pag.extract_text()
@@ -102,7 +85,7 @@ def extraer_datos_pdf_dinamico(file_stream):
         rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
     radicado = rad_match.group(1).strip() if rad_match else ""
 
-    # 2. FECHA DE RADICADO DEL STICKER
+    # 2. FECHA DEL STICKER DE RADICACIÓN
     fecha_rad_str = ""
     sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
     if sticker_match:
@@ -111,32 +94,32 @@ def extraer_datos_pdf_dinamico(file_stream):
         ano_s = sticker_match.group(3)
         fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
 
-    # 3. PERÍODO CAUSADO
+    # 3. EXTRAER CÉDULAS
+    todas_cedulas = re.findall(r"(\d{7,10})", texto_unificado)
+
+    # 4. PERÍODO CAUSADO (Flexibilidad de conectores)
     p_inicio, p_fin = "", ""
-    per_num = re.search(r"laborado\s+(?:del|desde\s+el)\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s+(?:al|hasta\s+el)\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})", texto_unificado, re.IGNORECASE)
-    if per_num:
-        p_inicio = convertir_fecha_num_a_texto(per_num.group(1))
-        p_fin = convertir_fecha_num_a_texto(per_num.group(2))
+    periodo_match = re.search(r"(?:comprendido\s+entre\s+el|periodo\s+del|periodo\s+causado\s+del)\s+(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})\s+(?:al|hasta\s+el|y\s+el)\s+(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
+    if periodo_match:
+        p_inicio = periodo_match.group(1).strip()
+        p_fin = periodo_match.group(2).strip()
     else:
         patron_fechas = re.findall(r"(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
         if len(patron_fechas) >= 2:
             p_inicio = patron_fechas[0]
             p_fin = patron_fechas[1]
 
-    # 4. FECHA DE DISFRUTE
+    # 5. FECHA DE DISFRUTE
+    disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+[a-zA-Z]+(?:\s+de\s+\d{4})?)", texto_unificado, re.IGNORECASE)
     fecha_disfrute_obj = datetime.date.today()
-    fecha_fin_directa = ""
-
-    disfrute_rango = re.search(r"entre\s+el\s+(\d{1,2})\s+y\s+el\s+(\d{1,2})\s+de\s+([a-zA-Z]+)\s+de\s+(\d{4})", texto_unificado, re.IGNORECASE)
-    if disfrute_rango:
-        d_dia = int(disfrute_rango.group(1))
-        f_dia = int(disfrute_rango.group(2))
-        d_mes_nom = disfrute_rango.group(3).lower()
-        d_mes = meses_nom.get(d_mes_nom, datetime.date.today().month)
-        d_ano = int(disfrute_rango.group(4))
-        
-        fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
-        fecha_fin_directa = f"{f_dia:02d} de {d_mes_nom} de {d_ano}"
+    if disfrute_match:
+        raw_d = disfrute_match.group(1).lower().replace(".", "").strip()
+        partes = raw_d.split()
+        if len(partes) >= 3:
+            d_dia = int(partes[0])
+            d_mes = meses_nom.get(partes[2], 7)
+            d_ano = int(partes[4]) if len(partes) >= 5 else 2026
+            fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
 
     return {
         "radicado": radicado,
@@ -144,8 +127,8 @@ def extraer_datos_pdf_dinamico(file_stream):
         "periodo_inicio": p_inicio,
         "periodo_fin": p_fin,
         "fecha_inicio_obj": fecha_disfrute_obj,
-        "fecha_fin_override": fecha_fin_directa,
-        "texto_unificado": texto_unificado.upper()
+        "cedulas_extraidas": todas_cedulas,
+        "texto_completo": texto_unificado.upper()
     }
 
 def obtener_datos_centro_y_firmante(codigo_dep):
@@ -168,8 +151,8 @@ def obtener_datos_centro_y_firmante(codigo_dep):
             "centro": "Centro de Gestión Administrativa y Fortalecimiento Empresarial de la regional Boyacá",
             "titulo_encabezado": "SUBDIRECTOR (E) DEL CENTRO DE GESTIÓN ADMINISTRATIVA Y FORTALECIMIENTO EMPRESARIAL DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
             "ciudad": "Tunja",
-            "jefe_nombre": "Gustavo Enrique Cely Camargo",
-            "jefe_cargo": "Subdirector (Edo) CEGAFE"
+            "jefe_nombre": "Subdirector CGAFE",
+            "jefe_cargo": "Subdirector de Centro (E)"
         },
         "9514": {
             "centro": "Centro Industrial de Mantenimiento y Manufactura de la regional Boyacá",
@@ -186,11 +169,11 @@ def obtener_datos_centro_y_firmante(codigo_dep):
             "jefe_cargo": "Director Regional Boyacá"
         }
     }
-    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["9305"])
+    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["1010"])
 
 def obtener_cargo_y_dep(nombre_empleado, cedula=None):
-    cargo_oficial = "Profesional Grado 05"
-    codigo_dep = "9305"
+    cargo_oficial = "Profesional G04"
+    codigo_dep = "1010"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
         return cargo_oficial, codigo_dep
@@ -248,14 +231,7 @@ else:
     archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
-        # DETECTAR SI ES UN ARCHIVO NUEVO Y REINICIAR MEMORIA
-        if 'ultimo_archivo_cargado' not in st.session_state or st.session_state['ultimo_archivo_cargado'] != archivo_pdf.name:
-            st.session_state['ultimo_archivo_cargado'] = archivo_pdf.name
-            st.session_state['timestamp_carga'] = str(time.time())
-            st.session_state['datos_carta'] = extraer_datos_pdf_dinamico(archivo_pdf)
-
-        datos_carta = st.session_state['datos_carta']
-        ts = st.session_state['timestamp_carga']
+        datos_carta = extraer_datos_pdf(archivo_pdf)
         
         xls = pd.ExcelFile(EXCEL_HISTORIAL)
         nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
@@ -267,114 +243,117 @@ else:
         
         lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        OPCION_NEUTRA = "--- SELECCIONE EL FUNCIONARIO ---"
-        lista_opciones = [OPCION_NEUTRA] + lista_funcionarios
-
-        # ALGORITMO DE COINCIDENCIA DE NOMBRES
+        # BÚSQUEDA DEL SOLICITANTE POR CÉDULA DE KACTUS
         indice_sugerido = 0
-        texto = datos_carta['texto_unificado']
+        encontrado = False
 
-        if texto:
-            for idx, nom in enumerate(lista_funcionarios, start=1):
-                partes = [p for p in nom.split() if len(p) > 2]
-                coincidencias = sum(1 for p in partes if p in texto)
-                if coincidencias >= 2:
-                    if not any(excl in nom for excl in ["ENITH", "NIDIA", "GUSTAVO", "DIRECTOR", "COORDINADOR"]):
-                        indice_sugerido = idx
-                        break
+        for c_ext in datos_carta['cedulas_extraidas']:
+            filas_c = df_kactus[df_kactus['Identificación'].astype(str).str.contains(c_ext)]
+            if not filas_c.empty:
+                nom_c = filas_c.iloc[0]['Nombre_Completo']
+                if nom_c in lista_funcionarios:
+                    indice_sugerido = lista_funcionarios.index(nom_c)
+                    encontrado = True
+                    break
 
-        st.success(f"📄 Carta '{archivo_pdf.name}' cargada.")
+        if not encontrado:
+            for idx, nom in enumerate(lista_funcionarios):
+                partes = nom.split()
+                if len(partes) >= 2:
+                    if partes[0] in datos_carta['texto_completo'] and partes[-1] in datos_carta['texto_completo']:
+                        if "ENITH" not in nom and "NIDIA" not in nom and "NORA" not in nom:
+                            indice_sugerido = idx
+                            break
+
+        st.success("📄 Carta analizada correctamente.")
         st.markdown("### 👤 Confirmación del Solicitante:")
         
         solicitante_elegido = st.selectbox(
             "Verifica o selecciona el funcionario que solicita las vacaciones:",
-            options=lista_opciones,
-            index=indice_sugerido,
-            key=f"select_{archivo_pdf.name}_{ts}"
+            options=lista_funcionarios,
+            index=indice_sugerido
         )
+
+        fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
+        
+        cedula_num = int(fila_encontrada['Identificación'])
+        cedula_puntos = f"{cedula_num:,}".replace(",", ".")
+        nombre_completo = solicitante_elegido
 
         st.markdown("---")
         st.markdown("### 📅 Ajusta o confirma las fechas e información extraída de la carta:")
         col1, col2 = st.columns(2)
         with col1:
-            radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'], key=f"rad_{archivo_pdf.name}_{ts}")
-            fecha_rad_final = st.text_input("Fecha del Radicado:", value=datos_carta['fecha_radicado'], key=f"f_rad_{archivo_pdf.name}_{ts}")
-            p_ini_final = st.text_input("Período Causado (Inicio):", value=datos_carta['periodo_inicio'], key=f"p_ini_{archivo_pdf.name}_{ts}")
+            radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'])
+            fecha_rad_final = st.text_input("Fecha del Radicado:", value=datos_carta['fecha_radicado'])
+            p_ini_final = st.text_input("Período Causado (Inicio):", value=datos_carta['periodo_inicio'])
         with col2:
-            p_fin_final = st.text_input("Período Causado (Fin):", value=datos_carta['periodo_fin'], key=f"p_fin_{archivo_pdf.name}_{ts}")
-            f_ini_obj_final = st.date_input("Fecha Inicio Disfrute:", value=datos_carta['fecha_inicio_obj'], key=f"f_disf_{archivo_pdf.name}_{ts}")
+            p_fin_final = st.text_input("Período Causado (Fin):", value=datos_carta['periodo_fin'])
+            f_ini_obj_final = st.date_input("Fecha Inicio Disfrute:", value=datos_carta['fecha_inicio_obj'])
 
         st.markdown("---")
 
-        if solicitante_elegido == OPCION_NEUTRA:
-            st.warning("⚠️ Selecciona el funcionario solicitante en el menú desplegable de arriba para continuar.")
-        else:
-            fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
-            cedula_num = int(fila_encontrada['Identificación'])
-            cedula_puntos = f"{cedula_num:,}".replace(",", ".")
-            nombre_completo = solicitante_elegido
+        if st.button("⚡ Generar Resolución en Word"):
+            genero = str(fila_encontrada.get('Sexo', '')).upper()
+            if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO', 'NORA', 'IRMA')):
+                texto_funcionario = "la funcionaria"
+                texto_funcionario_a = "a la funcionaria"
+            else:
+                texto_funcionario = "el funcionario"
+                texto_funcionario_a = "al funcionario"
 
-            if st.button("⚡ Generar Resolución en Word"):
-                genero = str(fila_encontrada.get('Sexo', '')).upper()
-                if 'F' in genero or nombre_completo.startswith(('MYRIAM', 'BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
-                    texto_funcionario = "la funcionaria"
-                    texto_funcionario_a = "a la funcionaria"
-                else:
-                    texto_funcionario = "el funcionario"
-                    texto_funcionario_a = "al funcionario"
+            cargo, cod_dep = obtener_cargo_y_dep(nombre_completo, str(cedula_num))
+            info_centro = obtener_datos_centro_y_firmante(cod_dep)
+            
+            meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+            
+            fecha_fin_obj = calcular_fecha_fin(f_ini_obj_final, 15)
+            
+            dia_fin_str = f"{fecha_fin_obj.day:02d}" if fecha_fin_obj.day < 10 else f"{fecha_fin_obj.day}"
+            fecha_fin_str = f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
+            
+            dia_ini_str = f"{f_ini_obj_final.day:02d}" if f_ini_obj_final.day < 10 else f"{f_ini_obj_final.day}"
+            fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
 
-                cargo, cod_dep = obtener_cargo_y_dep(nombre_completo, str(cedula_num))
-                info_centro = obtener_datos_centro_y_firmante(cod_dep)
-                
-                meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-                
-                fecha_fin_obj = calcular_fecha_fin(f_ini_obj_final, 15)
-                dia_fin_str = f"{fecha_fin_obj.day:02d}" if fecha_fin_obj.day < 10 else f"{fecha_fin_obj.day}"
-                
-                fecha_fin_str = datos_carta.get('fecha_fin_override') if datos_carta.get('fecha_fin_override') else f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
-                
-                dia_ini_str = f"{f_ini_obj_final.day:02d}" if f_ini_obj_final.day < 10 else f"{f_ini_obj_final.day}"
-                fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
+            hoy = datetime.date.today()
+            fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
 
-                hoy = datetime.date.today()
-                fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
+            doc = Document(PLANTILLA_WORD)
+            
+            reemplazos = {
+                "[TITULO_DIRECTOR_COMPLETO]": info_centro["titulo_encabezado"],
+                "[TEXTO_FUNCIONARIO]": texto_funcionario,
+                "[TEXTO_FUNCIONARIO_A]": texto_funcionario_a,
+                "[NOMBRE_EMPLEADO]": nombre_completo,
+                "[CEDULA]": cedula_puntos,
+                "[CARGO]": cargo,
+                "[CENTRO_FORMACION]": info_centro["centro"],
+                "[RADICADO]": radicado_final,
+                "[FECHA_RADICADO]": fecha_rad_final,
+                "[FECHA_INICIO]": fecha_inicio_formateada,
+                "[FECHA_FIN]": fecha_fin_str,
+                "[PERIODO_INICIO]": p_ini_final,
+                "[PERIODO_FIN]": p_fin_final,
+                "[CIUDAD_CENTRO]": info_centro["ciudad"],
+                "[FECHA_HOY]": fecha_hoy_str,
+                "[NOMBRE_JEFE_FIRMA]": info_centro["jefe_nombre"],
+                "[CARGO_JEFE_FIRMA]": info_centro["jefe_cargo"]
+            }
+            
+            reemplazar_respetando_formato(doc, reemplazos)
 
-                doc = Document(PLANTILLA_WORD)
-                
-                reemplazos = {
-                    "[TITULO_DIRECTOR_COMPLETO]": info_centro["titulo_encabezado"],
-                    "[TEXTO_FUNCIONARIO]": texto_funcionario,
-                    "[TEXTO_FUNCIONARIO_A]": texto_funcionario_a,
-                    "[NOMBRE_EMPLEADO]": nombre_completo,
-                    "[CEDULA]": cedula_puntos,
-                    "[CARGO]": cargo,
-                    "[CENTRO_FORMACION]": info_centro["centro"],
-                    "[RADICADO]": radicado_final,
-                    "[FECHA_RADICADO]": fecha_rad_final,
-                    "[FECHA_INICIO]": fecha_inicio_formateada,
-                    "[FECHA_FIN]": fecha_fin_str,
-                    "[PERIODO_INICIO]": p_ini_final,
-                    "[PERIODO_FIN]": p_fin_final,
-                    "[CIUDAD_CENTRO]": info_centro["ciudad"],
-                    "[FECHA_HOY]": fecha_hoy_str,
-                    "[NOMBRE_JEFE_FIRMA]": info_centro["jefe_nombre"],
-                    "[CARGO_JEFE_FIRMA]": info_centro["jefe_cargo"]
-                }
-                
-                reemplazar_respetando_formato(doc, reemplazos)
+            timestamp_unico = int(time.time())
+            nombre_archivo_salida = f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}_{timestamp_unico}.docx"
+            salida_path = os.path.join(BASE_DIR, nombre_archivo_salida)
+            doc.save(salida_path)
 
-                timestamp_unico = int(time.time())
-                nombre_archivo_salida = f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}_{timestamp_unico}.docx"
-                salida_path = os.path.join(BASE_DIR, nombre_archivo_salida)
-                doc.save(salida_path)
+            st.balloons()
+            st.success(f"✅ ¡Resolución generada con éxito!")
 
-                st.balloons()
-                st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo}!")
-
-                with open(salida_path, "rb") as file_docx:
-                    st.download_button(
-                        label=f"📥 DESCARGAR RESOLUCIÓN DE {nombre_completo}",
-                        data=file_docx,
-                        file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    )
+            with open(salida_path, "rb") as file_docx:
+                st.download_button(
+                    label=f"📥 DESCARGAR RESOLUCIÓN DE {nombre_completo}",
+                    data=file_docx,
+                    file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
