@@ -5,7 +5,6 @@ import datetime
 import pandas as pd
 from pypdf import PdfReader
 from docx import Document
-from docx.shared import Cm, Pt
 import streamlit as st
 
 # --- CONFIGURACIÓN DE PÁGINA ---
@@ -47,6 +46,7 @@ MAESTRO_CARGOS = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.
 
 if st.sidebar.button("🔄 Reiniciar Memoria / Forzar Limpieza"):
     st.cache_data.clear()
+    st.session_state.clear()
     st.rerun()
 
 FESTIVOS_COLOMBIA = [
@@ -68,7 +68,17 @@ def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
             fecha_actual += datetime.timedelta(days=1)
     return fecha_actual
 
-def extraer_datos_pdf(file_bytes):
+def convertir_fecha_num_a_texto(fecha_str):
+    meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
+    partes = fecha_str.replace("-", "/").split("/")
+    if len(partes) == 3:
+        dia = int(partes[0])
+        mes = int(partes[1])
+        ano = partes[2]
+        return f"{dia:02d} de {meses_dict.get(mes, 'enero')} de {ano}"
+    return fecha_str
+
+def extraer_datos_pdf_dinamico(file_bytes):
     lector = PdfReader(file_bytes)
     texto = ""
     for pag in lector.pages:
@@ -81,37 +91,55 @@ def extraer_datos_pdf(file_bytes):
 
     texto_unificado = " ".join(texto.split())
 
-    # 1. RADICADO (15-1-2026-004935)
+    # 1. RADICADO DINÁMICO (Ej. No: 15-1-2026-004301)
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{5,8})", texto_unificado)
     if not rad_match:
         rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
-    radicado = rad_match.group(1).strip() if rad_match else "15-1-2026-004935"
+    radicado = rad_match.group(1).strip() if rad_match else "15-1-2026-004301"
 
-    # 2. FECHA DE RADICADO (Del sticker: 3/8/2026 -> 03 de agosto de 2026)
-    fecha_rad_str = "03 de agosto de 2026"
+    # 2. FECHA DE RADICADO DEL STICKER (Ej. 26/6/2026 -> 26 de junio de 2026)
+    fecha_rad_str = "26 de junio de 2026"
     sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
     if sticker_match:
         dia_s = int(sticker_match.group(1))
         mes_s = int(sticker_match.group(2))
         ano_s = sticker_match.group(3)
-        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'agosto')} de {ano_s}"
+        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
 
-    # 3. DATES DEL PERÍODO CAUSADO (24 de agosto de 2024 al 23 de agosto de 2025)
-    patron_fechas = re.findall(r"(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
-    p_inicio = patron_fechas[0] if len(patron_fechas) >= 1 else "24 de agosto de 2024"
-    p_fin = patron_fechas[1] if len(patron_fechas) >= 2 else "23 de agosto de 2025"
+    # 3. PERÍODO CAUSADO (Acepta formato 29/09/2024 al 29/09/2025 o formato texto)
+    p_inicio, p_fin = "29 de septiembre de 2024", "29 de septiembre de 2025"
+    
+    # Intento 1: Formato numérico DD/MM/AAAA al DD/MM/AAAA
+    per_num = re.search(r"laborado\s+del\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s+al\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})", texto_unificado, re.IGNORECASE)
+    if per_num:
+        p_inicio = convertir_fecha_num_a_texto(per_num.group(1))
+        p_fin = convertir_fecha_num_a_texto(per_num.group(2))
+    else:
+        # Intento 2: Formato texto
+        patron_fechas = re.findall(r"(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
+        if len(patron_fechas) >= 2:
+            p_inicio = patron_fechas[0]
+            p_fin = patron_fechas[1]
 
-    # 4. FECHA DE DISFRUTE (31 de Agosto de 2026)
-    disfrute_match = re.search(r"(?:a\s+partir\s+del\s+día|a\s+partir\s+del|inicio\s+el|partir\s+de)\s+(\d{1,2}\s+de\s+[a-zA-Z]+(?:\s+de\s+\d{4})?)", texto_unificado, re.IGNORECASE)
-    fecha_disfrute_obj = datetime.date(2026, 8, 31)
-    if disfrute_match:
-        raw_d = disfrute_match.group(1).lower().replace(".", "").strip()
-        partes = raw_d.split()
-        if len(partes) >= 3:
-            d_dia = int(partes[0])
-            d_mes = meses_nom.get(partes[2], 8)
-            d_ano = int(partes[4]) if len(partes) >= 5 else 2026
-            fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
+    # 4. FECHA DE DISFRUTE (Ej. "entre el 10 y el 31 de agosto de 2026")
+    fecha_disfrute_obj = datetime.date(2026, 8, 10)
+    
+    disfrute_rango = re.search(r"entre\s+el\s+(\d{1,2})\s+y\s+el\s+\d{1,2}\s+de\s+([a-zA-Z]+)\s+de\s+(\d{4})", texto_unificado, re.IGNORECASE)
+    if disfrute_rango:
+        d_dia = int(disfrute_rango.group(1))
+        d_mes = meses_nom.get(disfrute_rango.group(2).lower(), 8)
+        d_ano = int(disfrute_rango.group(3))
+        fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
+    else:
+        disfrute_match = re.search(r"(?:a\s+partir\s+del\s+día|a\s+partir\s+del|inicio\s+el|partir\s+de)\s+(\d{1,2}\s+de\s+[a-zA-Z]+(?:\s+de\s+\d{4})?)", texto_unificado, re.IGNORECASE)
+        if disfrute_match:
+            raw_d = disfrute_match.group(1).lower().replace(".", "").strip()
+            partes = raw_d.split()
+            if len(partes) >= 3:
+                d_dia = int(partes[0])
+                d_mes = meses_nom.get(partes[2], 8)
+                d_ano = int(partes[4]) if len(partes) >= 5 else 2026
+                fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
 
     return {
         "radicado": radicado,
@@ -142,8 +170,8 @@ def obtener_datos_centro_y_firmante(codigo_dep):
             "centro": "Centro de Gestión Administrativa y Fortalecimiento Empresarial de la regional Boyacá",
             "titulo_encabezado": "SUBDIRECTOR (E) DEL CENTRO DE GESTIÓN ADMINISTRATIVA Y FORTALECIMIENTO EMPRESARIAL DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
             "ciudad": "Tunja",
-            "jefe_nombre": "Subdirector CGAFE",
-            "jefe_cargo": "Subdirector de Centro (E)"
+            "jefe_nombre": "Gustavo Enrique Cely Camargo",
+            "jefe_cargo": "Subdirector (Edo) CEGAFE"
         },
         "9514": {
             "centro": "Centro Industrial de Mantenimiento y Manufactura de la regional Boyacá",
@@ -160,11 +188,11 @@ def obtener_datos_centro_y_firmante(codigo_dep):
             "jefe_cargo": "Director Regional Boyacá"
         }
     }
-    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["1010"])
+    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["9305"])
 
 def obtener_cargo_y_dep(nombre_empleado, cedula=None):
-    cargo_oficial = "Profesional G06"
-    codigo_dep = "1010"
+    cargo_oficial = "Profesional Grado 05"
+    codigo_dep = "9305"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
         return cargo_oficial, codigo_dep
@@ -222,7 +250,12 @@ else:
     archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
-        datos_carta = extraer_datos_pdf(archivo_pdf)
+        # CONTROL DE CAMBIO DE ARCHIVO (Limpia memoria de cartas anteriores)
+        if 'nombre_archivo_actual' not in st.session_state or st.session_state['nombre_archivo_actual'] != archivo_pdf.name:
+            st.session_state['nombre_archivo_actual'] = archivo_pdf.name
+            st.session_state['datos_carta'] = extraer_datos_pdf_dinamico(archivo_pdf)
+
+        datos_carta = st.session_state['datos_carta']
         
         xls = pd.ExcelFile(EXCEL_HISTORIAL)
         nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
@@ -234,27 +267,24 @@ else:
         
         lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        # BÚSQUEDA PRECISA DEL SOLICITANTE EN EL PDF
+        # BÚSQUEDA DEL SOLICITANTE
         indice_sugerido = 0
-        encontrado_exacto = False
-        
         for idx, nom in enumerate(lista_funcionarios):
             partes = nom.split()
             if len(partes) >= 2:
-                # Si el primer nombre y primer apellido están en el PDF (y no es Enith/Nidia)
                 if partes[0] in datos_carta['texto_completo'] and partes[-1] in datos_carta['texto_completo']:
-                    if "ENITH" not in nom and "NIDIA" not in nom:
+                    if "ENITH" not in nom and "NIDIA" not in nom and "GUSTAVO" not in nom:
                         indice_sugerido = idx
-                        encontrado_exacto = True
                         break
 
-        st.success("📄 Carta analizada correctamente.")
+        st.success(f"📄 Carta '{archivo_pdf.name}' cargada y analizada correctamente.")
         st.markdown("### 👤 Confirmación del Solicitante:")
         
         solicitante_elegido = st.selectbox(
             "Verifica o selecciona el funcionario que solicita las vacaciones:",
             options=lista_funcionarios,
-            index=indice_sugerido
+            index=indice_sugerido,
+            key=f"select_{archivo_pdf.name}"
         )
 
         fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
@@ -267,18 +297,18 @@ else:
         st.markdown("### 📅 Ajusta o confirma las fechas e información extraída de la carta:")
         col1, col2 = st.columns(2)
         with col1:
-            radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'])
-            fecha_rad_final = st.text_input("Fecha del Radicado:", value=datos_carta['fecha_radicado'])
-            p_ini_final = st.text_input("Período Causado (Inicio):", value=datos_carta['periodo_inicio'])
+            radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'], key=f"rad_{archivo_pdf.name}")
+            fecha_rad_final = st.text_input("Fecha del Radicado:", value=datos_carta['fecha_radicado'], key=f"f_rad_{archivo_pdf.name}")
+            p_ini_final = st.text_input("Período Causado (Inicio):", value=datos_carta['periodo_inicio'], key=f"p_ini_{archivo_pdf.name}")
         with col2:
-            p_fin_final = st.text_input("Período Causado (Fin):", value=datos_carta['periodo_fin'])
-            f_ini_obj_final = st.date_input("Fecha Inicio Disfrute:", value=datos_carta['fecha_inicio_obj'])
+            p_fin_final = st.text_input("Período Causado (Fin):", value=datos_carta['periodo_fin'], key=f"p_fin_{archivo_pdf.name}")
+            f_ini_obj_final = st.date_input("Fecha Inicio Disfrute:", value=datos_carta['fecha_inicio_obj'], key=f"f_disf_{archivo_pdf.name}")
 
         st.markdown("---")
 
         if st.button("⚡ Generar Resolución en Word"):
             genero = str(fila_encontrada.get('Sexo', '')).upper()
-            if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
+            if 'F' in genero or nombre_completo.startswith(('MYRIAM', 'BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
                 texto_funcionario = "la funcionaria"
                 texto_funcionario_a = "a la funcionaria"
             else:
@@ -331,7 +361,7 @@ else:
             doc.save(salida_path)
 
             st.balloons()
-            st.success(f"✅ ¡Resolución generada con éxito!")
+            st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo}!")
 
             with open(salida_path, "rb") as file_docx:
                 st.download_button(
