@@ -106,10 +106,9 @@ def extraer_datos_pdf_dinamico(file_bytes):
         ano_s = sticker_match.group(3)
         fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
 
-    # 3. PERÍODO CAUSADO
+    # 3. PERÍODO CAUSADO (Soporta formatos numéricos DD/MM/AAAA y en texto)
     p_inicio, p_fin = "29 de septiembre de 2024", "29 de septiembre de 2025"
-    
-    per_num = re.search(r"laborado\s+del\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s+al\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})", texto_unificado, re.IGNORECASE)
+    per_num = re.search(r"laborado\s+(?:del|desde\s+el)\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s+(?:al|hasta\s+el)\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})", texto_unificado, re.IGNORECASE)
     if per_num:
         p_inicio = convertir_fecha_num_a_texto(per_num.group(1))
         p_fin = convertir_fecha_num_a_texto(per_num.group(2))
@@ -127,32 +126,6 @@ def extraer_datos_pdf_dinamico(file_bytes):
         d_mes = meses_nom.get(disfrute_rango.group(2).lower(), 8)
         d_ano = int(disfrute_rango.group(3))
         fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
-    else:
-        disfrute_match = re.search(r"(?:a\s+partir\s+del\s+día|a\s+partir\s+del|inicio\s+el|partir\s+de)\s+(\d{1,2}\s+de\s+[a-zA-Z]+(?:\s+de\s+\d{4})?)", texto_unificado, re.IGNORECASE)
-        if disfrute_match:
-            raw_d = disfrute_match.group(1).lower().replace(".", "").strip()
-            partes = raw_d.split()
-            if len(partes) >= 3:
-                d_dia = int(partes[0])
-                d_mes = meses_nom.get(partes[2], 8)
-                d_ano = int(partes[4]) if len(partes) >= 5 else 2026
-                fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
-
-    # 5. AISLAR EL CUERPO Y LA FIRMA PARA DETERMINAR SOLICITANTE
-    texto_mayus = texto.upper()
-    
-    # Cortar antes de Vo.Bo.
-    pos_vobo = texto_mayus.find("VO.BO")
-    if pos_vobo == -1:
-        pos_vobo = texto_mayus.find("VO. BO.")
-    if pos_vobo == -1:
-        pos_vobo = texto_mayus.find("VOBO")
-        
-    texto_sin_vobo = texto_mayus[:pos_vobo] if pos_vobo != -1 else texto_mayus
-
-    # Cortar después del Saludo
-    pos_asunto = texto_sin_vobo.find("ASUNTO:")
-    texto_cuerpo = texto_sin_vobo[pos_asunto:] if pos_asunto != -1 else texto_sin_vobo
 
     return {
         "radicado": radicado,
@@ -160,7 +133,7 @@ def extraer_datos_pdf_dinamico(file_bytes):
         "periodo_inicio": p_inicio,
         "periodo_fin": p_fin,
         "fecha_inicio_obj": fecha_disfrute_obj,
-        "texto_cuerpo": texto_cuerpo
+        "texto_unificado": texto_unificado.upper()
     }
 
 def obtener_datos_centro_y_firmante(codigo_dep):
@@ -279,19 +252,29 @@ else:
         
         lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        # BÚSQUEDA PRECISA DEL SOLICITANTE EN EL CUERPO/FIRMA
-        indice_sugerido = 0
-        cuerpo = datos_carta['texto_cuerpo']
+        # ALGORITMO ROBUSTO DE COINCIDENCIA DE NOMBRES
+        indice_sugerido = None
+        texto = datos_carta['texto_unificado']
         
+        # 1. Búsqueda por 2 o más palabras clave (Nombre + Apellido)
         for idx, nom in enumerate(lista_funcionarios):
-            partes = nom.split()
-            if len(partes) >= 2:
-                # Buscar si primer nombre y primer apellido están en el cuerpo de la carta
-                if partes[0] in cuerpo and partes[-1] in cuerpo:
-                    # Descartar destinatarios / vistos buenos comunes
+            partes = [p for p in nom.split() if len(p) > 2]
+            coincidencias = sum(1 for p in partes if p in texto)
+            if coincidencias >= 2:
+                if not any(excl in nom for excl in ["ENITH", "NIDIA", "GUSTAVO", "DIRECTOR", "COORDINADOR"]):
+                    indice_sugerido = idx
+                    break
+
+        # Si no hay coincidencia directa de 2 palabras, buscar por apellido único
+        if indice_sugerido is None:
+            for idx, nom in enumerate(lista_funcionarios):
+                partes = [p for p in nom.split() if len(p) > 3]
+                if any(p in texto for p in partes):
                     if not any(excl in nom for excl in ["ENITH", "NIDIA", "GUSTAVO", "DIRECTOR", "COORDINADOR"]):
                         indice_sugerido = idx
                         break
+
+        index_final = indice_sugerido if indice_sugerido is not None else 0
 
         st.success(f"📄 Carta '{archivo_pdf.name}' cargada correctamente.")
         st.markdown("### 👤 Confirmación del Solicitante:")
@@ -299,7 +282,7 @@ else:
         solicitante_elegido = st.selectbox(
             "Verifica o selecciona el funcionario que solicita las vacaciones:",
             options=lista_funcionarios,
-            index=indice_sugerido,
+            index=index_final,
             key=f"select_{archivo_pdf.name}"
         )
 
