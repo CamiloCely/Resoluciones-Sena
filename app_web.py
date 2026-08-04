@@ -81,13 +81,13 @@ def extraer_datos_pdf(file_bytes):
 
     texto_unificado = " ".join(texto.split())
 
-    # 1. RADICADO (Búsqueda de patrón 15-1-2026-XXXXXX)
+    # 1. RADICADO
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{5,8})", texto_unificado)
     if not rad_match:
         rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
     radicado = rad_match.group(1).strip() if rad_match else "15-1-2026-004935"
 
-    # 2. FECHA DE RADICADO (Del sticker: 3/8/2026 -> 03 de agosto de 2026)
+    # 2. FECHA DE RADICADO
     fecha_rad_str = "03 de agosto de 2026"
     sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
     if sticker_match:
@@ -228,30 +228,32 @@ else:
         nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
         df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
 
-        # Crear lista completa de funcionarios
-        df_kactus['Nombre_Completo'] = df_kactus['Nombre del Empleado'].astype(str) + " " + df_kactus['Apellidos Empleado'].astype(str)
-        lista_funcionarios = sorted(df_kactus['Nombre_Completo'].str.upper().unique().tolist())
+        # Crear columna limpia asegurando conversión a string (evita el TypeError)
+        nombres_limpios = df_kactus['Nombre del Empleado'].fillna('').astype(str)
+        apellidos_limpios = df_kactus['Apellidos Empleado'].fillna('').astype(str)
+        df_kactus['Nombre_Completo'] = (nombres_limpios + " " + apellidos_limpios).str.strip().str.upper()
+        
+        # Filtrar valores no vacíos
+        lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        # Pre-seleccionar inteligentemente buscando coincidencia que no sea Enith ni directores
+        # Pre-selección inteligente
         indice_sugerido = 0
         for idx, nom in enumerate(lista_funcionarios):
-            p_nom = nom.split()[0]
-            if p_nom in datos_carta['texto_completo'] and "ENITH" not in nom and "NIDIA" not in nom:
+            p_nom = nom.split()[0] if nom else ""
+            if p_nom and p_nom in datos_carta['texto_completo'] and "ENITH" not in nom and "NIDIA" not in nom:
                 indice_sugerido = idx
                 break
 
         st.success("📄 Carta analizada correctamente.")
         st.markdown("### 👤 Confirmación del Solicitante:")
         
-        # MENÚ DESPLEGABLE DE SEGURIDAD TOTAL
         solicitante_elegido = st.selectbox(
             "Verifica o selecciona el funcionario que solicita las vacaciones:",
             options=lista_funcionarios,
             index=indice_sugerido
         )
 
-        # Obtener datos de la persona elegida
-        fila_encontrada = df_kactus[df_kactus['Nombre_Completo'].str.upper() == solicitante_elegido].iloc[0]
+        fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
         
         cedula_num = int(fila_encontrada['Identificación'])
         cedula_puntos = f"{cedula_num:,}".replace(",", ".")
@@ -334,4 +336,3 @@ else:
                     file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
-                
