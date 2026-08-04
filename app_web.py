@@ -66,7 +66,7 @@ def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
             fecha_actual += datetime.timedelta(days=1)
     return fecha_actual
 
-def extraer_datos_pdf(file_bytes):
+def extraer_datos_pdf(file_bytes, filename_pdf=""):
     lector = PdfReader(file_bytes)
     texto = ""
     for pag in lector.pages:
@@ -79,13 +79,18 @@ def extraer_datos_pdf(file_bytes):
 
     texto_unificado = " ".join(texto.split())
 
-    # 1. BÚSQUEDA ROBUSTA DE RADICADOS (SENA: 15-1-YYYY-XXXXXX)
+    # 1. RADICADO (Texto del PDF o Nombre del Archivo si el sello es una imagen)
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", texto_unificado)
     if not rad_match:
-        rad_match = re.search(r"(?:No:?|Radicado|No\.)\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
+        rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
+    
+    # Si no lo halla en el texto, buscar en el nombre del archivo PDF subido
+    if not rad_match and filename_pdf:
+        rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", filename_pdf)
+
     radicado = rad_match.group(1).strip() if rad_match else ""
 
-    # 2. FECHA DEL STICKER DE RADICACIÓN (d/m/aaaa)
+    # 2. FECHA DEL STICKER DE RADICACIÓN
     fecha_rad_str = ""
     sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
     if sticker_match:
@@ -94,10 +99,10 @@ def extraer_datos_pdf(file_bytes):
         ano_s = sticker_match.group(3)
         fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
 
-    # 3. EXTRAER CÉDULAS
+    # 3. CÉDULAS
     todas_cedulas = re.findall(r"(\d{7,10})", texto_unificado)
 
-    # 4. PERÍODO CAUSADO (Flexibilidad de conectores)
+    # 4. PERÍODO CAUSADO
     p_inicio, p_fin = "", ""
     periodo_match = re.search(r"(?:comprendido\s+entre\s+el|periodo\s+del|periodo\s+causado\s+del)\s+(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})\s+(?:al|hasta\s+el|y\s+el)\s+(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
     if periodo_match:
@@ -231,7 +236,7 @@ else:
     archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
-        datos_carta = extraer_datos_pdf(archivo_pdf)
+        datos_carta = extraer_datos_pdf(archivo_pdf, archivo_pdf.name)
         
         xls = pd.ExcelFile(EXCEL_HISTORIAL)
         nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
@@ -243,7 +248,7 @@ else:
         
         lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        # BÚSQUEDA DEL SOLICITANTE POR CÉDULA DE KACTUS
+        # BÚSQUEDA DEL SOLICITANTE POR CÉDULA
         indice_sugerido = 0
         encontrado = False
 
@@ -284,8 +289,10 @@ else:
         st.markdown("### 📅 Ajusta o confirma las fechas e información extraída de la carta:")
         col1, col2 = st.columns(2)
         with col1:
-            radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'])
-            fecha_rad_final = st.text_input("Fecha del Radicado:", value=datos_carta['fecha_radicado'])
+            val_rad = datos_carta['radicado'] if datos_carta['radicado'] else "[COMPLETAR RADICADO]"
+            val_f_rad = datos_carta['fecha_radicado'] if datos_carta['fecha_radicado'] else "[COMPLETAR FECHA RADICADO]"
+            radicado_final = st.text_input("Número de Radicado:", value=val_rad)
+            fecha_rad_final = st.text_input("Fecha del Radicado:", value=val_f_rad)
             p_ini_final = st.text_input("Período Causado (Inicio):", value=datos_carta['periodo_inicio'])
         with col2:
             p_fin_final = st.text_input("Período Causado (Fin):", value=datos_carta['periodo_fin'])
