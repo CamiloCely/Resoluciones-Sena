@@ -79,13 +79,13 @@ def extraer_datos_pdf(file_bytes):
 
     texto_unificado = " ".join(texto.split())
 
-    # 1. RADICADO DINÁMICO
-    rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{5,8})", texto_unificado)
+    # 1. BÚSQUEDA ROBUSTA DE RADICADOS (SENA: 15-1-YYYY-XXXXXX)
+    rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", texto_unificado)
     if not rad_match:
-        rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
+        rad_match = re.search(r"(?:No:?|Radicado|No\.)\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
     radicado = rad_match.group(1).strip() if rad_match else ""
 
-    # 2. FECHA DEL STICKER DE RADICACIÓN
+    # 2. FECHA DEL STICKER DE RADICACIÓN (d/m/aaaa)
     fecha_rad_str = ""
     sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
     if sticker_match:
