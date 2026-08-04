@@ -79,62 +79,32 @@ def extraer_datos_carta(file_bytes):
     meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
     meses_nom = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
 
-    # 1. RADICADO (Mejorado para detectar 15-1-2026-004697 o similares)
-    radicado_match = re.search(r"(?:No:?|Radicado|No\.)\s*([\d\-]{10,25})", texto, re.IGNORECASE)
+    # 1. RADICADO DE LA ESQUINA (ej. No: 15-1-2026-004697)
+    radicado_match = re.search(r"No:\s*([\d\-]{10,25})", texto, re.IGNORECASE)
     if not radicado_match:
         radicado_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{5,8})", texto)
-    radicado = radicado_match.group(1).strip() if radicado_match else "15-1-2026-004697"
+    radicado = radicado_match.group(1).strip() if radicado_match else "15-1-2026-000000"
 
-    # 2. FECHA DE RADICACIÓN (Prioridad a la fecha digital debajo del radicado, e.g. 23/7/2026)
-    fecha_rad_str = ""
-    fechas_digitales = re.findall(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto)
-    if fechas_digitales:
-        # La última o primera fecha digital suele ser la del sticker del radicado
-        f_dig = fechas_digitales[0]
-        dia_s = int(f_dig[0])
-        mes_s = int(f_dig[1])
-        ano_s = f_dig[2]
+    # 2. FECHA DIGITAL DEL STICKER (justo debajo del No:)
+    fecha_rad_str = "FECHA PENDIENTE"
+    sticker_match = re.search(r"No:\s*[\d\-]+\s*\n\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto, re.IGNORECASE)
+    if sticker_match:
+        dia_s = int(sticker_match.group(1))
+        mes_s = int(sticker_match.group(2))
+        ano_s = sticker_match.group(3)
         fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'julio')} de {ano_s}"
     else:
-        fecha_txt = re.search(r"(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-        if fecha_txt:
-            fecha_rad_str = fecha_txt.group(1).strip()
+        # Búsqueda secundaria de cualquier fecha digital d/m/aaaa
+        fechas_dig = re.findall(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto)
+        if fechas_dig:
+            f_d = fechas_dig[0]
+            fecha_rad_str = f"{int(f_d[0]):02d} de {meses_dict.get(int(f_d[1]), 'julio')} de {f_d[2]}"
 
-    if not fecha_rad_str:
-        fecha_rad_str = "23 de julio de 2026"
+    # 3. AISLAR Y CORTAR ESTRICTAMENTE EL REMITENTE (Eliminar Vo. Bo., Visto Bueno, Destinatario)
+    partes_vobo = re.split(r"Vo\.\s*Bo\.|VoBo|Visto\s+Bueno", texto, flags=re.IGNORECASE)
+    texto_remitente = partes_vobo[0] # Solo lo que está ANTES del primer Vo. Bo.
 
-    # 3. PERÍODO CAUSADO (Capta "del 5 de agosto de 2023 al 4 de agosto de 2024")
-    periodo_match = re.search(r"(?:periodo|período)\s+causado\s+(?:del\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-    if not periodo_match:
-        periodo_match = re.search(r"(?:periodo|período)\s+(?:comprendido\s+)?(?:entre\s+el\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+(?:al|y\s+el)\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto, re.IGNORECASE)
-        
-    p_inicio = periodo_match.group(1).strip() if periodo_match else "5 de agosto de 2023"
-    p_fin = periodo_match.group(2).strip() if periodo_match else "4 de agosto de 2024"
-
-    # 4. FECHA DE DISFRUTE ("a partir del 25 de septiembre")
-    disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+\w+(?:\s+de\s+\d{4})?)", texto, re.IGNORECASE)
-    fecha_disfrute_obj = datetime.date(2026, 9, 25)
-    if disfrute_match:
-        raw_disf = disfrute_match.group(1).lower().replace(".", "").strip()
-        partes = raw_disf.split()
-        d_dia = int(partes[0])
-        d_mes = meses_nom.get(partes[2], 9) if len(partes) >= 3 else 9
-        d_ano = int(partes[4]) if len(partes) >= 5 else 2026
-        fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
-
-    # 5. AISLAR REMITENTE
-    texto_mayus = texto.upper()
-    pos_vobo = texto_mayus.find("VO. BO.")
-    if pos_vobo == -1:
-        pos_vobo = texto_mayus.find("VOBO")
-    
-    texto_remitente = texto_mayus[:pos_vobo] if pos_vobo != -1 else texto_mayus
-
-    pos_cordialmente = texto_remitente.find("AGRADEZCO")
-    if pos_cordialmente == -1:
-        pos_cordialmente = texto_remitente.find("ATENTAMENTE")
-    bloque_firma = texto_remitente[pos_cordialmente:] if pos_cordialmente != -1 else texto_remitente
-
+    # 4. EXTRAER CÉDULA DEL SOLICITANTE
     todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", texto_remitente, re.IGNORECASE)
     cedula_limpia = None
     for c in todas_cedulas:
@@ -143,6 +113,27 @@ def extraer_datos_carta(file_bytes):
             cedula_limpia = num
             break
 
+    # 5. PERÍODO CAUSADO (Soportando saltos de línea \n)
+    texto_linea_unica = " ".join(texto.split()) # Quita saltos de línea para buscar perfecto
+    
+    periodo_match = re.search(r"(?:periodo|período)\s+causado\s+(?:del\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto_linea_unica, re.IGNORECASE)
+    if not periodo_match:
+        periodo_match = re.search(r"(?:periodo|período)\s+(?:comprendido\s+)?(?:entre\s+el\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+(?:al|y\s+el)\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto_linea_unica, re.IGNORECASE)
+        
+    p_inicio = periodo_match.group(1).strip() if periodo_match else None
+    p_fin = periodo_match.group(2).strip() if periodo_match else None
+
+    # 6. FECHA DE DISFRUTE
+    disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+\w+(?:\s+de\s+\d{4})?)", texto_linea_unica, re.IGNORECASE)
+    fecha_disfrute_obj = datetime.date.today()
+    if disfrute_match:
+        raw_disf = disfrute_match.group(1).lower().replace(".", "").strip()
+        partes = raw_disf.split()
+        d_dia = int(partes[0])
+        d_mes = meses_nom.get(partes[2], 9) if len(partes) >= 3 else 9
+        d_ano = int(partes[4]) if len(partes) >= 5 else 2026
+        fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
+
     return {
         "radicado": radicado,
         "fecha_radicado": fecha_rad_str,
@@ -150,8 +141,7 @@ def extraer_datos_carta(file_bytes):
         "periodo_fin": p_fin,
         "fecha_inicio_obj": fecha_disfrute_obj,
         "cedula_extraida": cedula_limpia,
-        "bloque_firma": bloque_firma,
-        "texto_remitente": texto_remitente
+        "texto_remitente": texto_remitente.upper()
     }
 
 def obtener_datos_centro_y_firmante(codigo_dep):
@@ -266,11 +256,13 @@ else:
 
                 fila_encontrada = None
                 
+                # 1. Buscar por Cédula extraída del área exclusiva del remitente
                 if datos_carta['cedula_extraida']:
                     filas = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
                     if not filas.empty:
                         fila_encontrada = filas.iloc[0]
                 
+                # 2. Buscar por nombre en la sección del remitente (SIN VO. BO.)
                 if fila_encontrada is None:
                     texto_rem = datos_carta['texto_remitente']
                     for idx, fila in df_kactus.iterrows():
@@ -313,6 +305,9 @@ else:
                     dia_ini_str = f"{f_ini_obj.day:02d}" if f_ini_obj.day < 10 else f"{f_ini_obj.day}"
                     fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj.month - 1]} de {f_ini_obj.year}"
 
+                    p_ini = datos_carta['periodo_inicio'] if datos_carta['periodo_inicio'] else "01 de enero de 2025"
+                    p_fin = datos_carta['periodo_fin'] if datos_carta['periodo_fin'] else "31 de diciembre de 2025"
+
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
 
@@ -330,8 +325,8 @@ else:
                         "[FECHA_RADICADO]": datos_carta['fecha_radicado'],
                         "[FECHA_INICIO]": fecha_inicio_formateada,
                         "[FECHA_FIN]": fecha_fin_str,
-                        "[PERIODO_INICIO]": datos_carta['periodo_inicio'],
-                        "[PERIODO_FIN]": datos_carta['periodo_fin'],
+                        "[PERIODO_INICIO]": p_ini,
+                        "[PERIODO_FIN]": p_fin,
                         "[CIUDAD_CENTRO]": info_centro["ciudad"],
                         "[FECHA_HOY]": fecha_hoy_str,
                         "[NOMBRE_JEFE_FIRMA]": info_centro["jefe_nombre"],
@@ -350,9 +345,9 @@ else:
                     
                     st.markdown("### 📋 Datos Confirmados del Solicitante:")
                     st.write(f"👤 **Solicitante:** {texto_funcionario.capitalize()} **{nombre_completo}**")
-                    st.write(f"🔢 **Radicado Extraído:** {datos_carta['radicado']} del **{datos_carta['fecha_radicado']}**")
+                    st.write(f"🔢 **Radicado Extraído:** **{datos_carta['radicado']}** del **{datos_carta['fecha_radicado']}**")
                     st.write(f"💼 **Cargo:** {cargo} | **Centro:** {info_centro['centro']}")
-                    st.write(f"📅 **Período Causado Extraído:** Del **{datos_carta['periodo_inicio']}** al **{datos_carta['periodo_fin']}**")
+                    st.write(f"📅 **Período Causado Extraído:** Del **{p_ini}** al **{p_fin}**")
                     st.write(f"🏖️ **Disfrute (15 Días Hábiles):** Del {fecha_inicio_formateada} al {fecha_fin_str}")
 
                     with open(salida_path, "rb") as file_docx:
