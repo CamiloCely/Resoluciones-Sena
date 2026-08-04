@@ -44,7 +44,7 @@ PLANTILLA_WORD = os.path.join(BASE_DIR, archivos_word[0]) if archivos_word else 
 archivos_pdf_maestro = [f for f in os.listdir(BASE_DIR) if "MAESTRO" in f.upper() and f.lower().endswith('.pdf')]
 MAESTRO_CARGOS = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else (os.path.join(BASE_DIR, archivos_pdf_maestro[0]) if archivos_pdf_maestro else None)
 
-if st.sidebar.button("🔄 Reiniciar Memoria / Forzar Limpieza"):
+if st.sidebar.button("🔄 Reiniciar Memoria / Limpiar Pantalla"):
     st.cache_data.clear()
     st.session_state.clear()
     st.rerun()
@@ -112,11 +112,6 @@ def extraer_datos_pdf_dinamico(file_bytes):
     if per_num:
         p_inicio = convertir_fecha_num_a_texto(per_num.group(1))
         p_fin = convertir_fecha_num_a_texto(per_num.group(2))
-    else:
-        patron_fechas = re.findall(r"(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
-        if len(patron_fechas) >= 2:
-            p_inicio = patron_fechas[0]
-            p_fin = patron_fechas[1]
 
     # 4. FECHA DE DISFRUTE
     fecha_disfrute_obj = datetime.date(2026, 8, 10)
@@ -236,11 +231,14 @@ else:
     archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
-        if 'nombre_archivo_actual' not in st.session_state or st.session_state['nombre_archivo_actual'] != archivo_pdf.name:
-            st.session_state['nombre_archivo_actual'] = archivo_pdf.name
+        # SI SE SUBE UN NUEVO ARCHIVO, SE REINICIAN LOS DATOS DE LA SESIÓN
+        if 'nombre_archivo_cargado' not in st.session_state or st.session_state['nombre_archivo_cargado'] != archivo_pdf.name:
+            st.session_state['nombre_archivo_cargado'] = archivo_pdf.name
+            st.session_state['timestamp_carga'] = str(time.time())
             st.session_state['datos_carta'] = extraer_datos_pdf_dinamico(archivo_pdf)
 
         datos_carta = st.session_state['datos_carta']
+        ts = st.session_state['timestamp_carga']
         
         xls = pd.ExcelFile(EXCEL_HISTORIAL)
         nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
@@ -255,7 +253,7 @@ else:
         OPCION_NEUTRA = "--- SELECCIONE EL FUNCIONARIO ---"
         lista_opciones = [OPCION_NEUTRA] + lista_funcionarios
 
-        # COINCIDENCIA DE TEXTO CON PALABRAS CLAVE
+        # BUSCAR COINCIDENCIAS AUTOMÁTICAS
         indice_sugerido = 0
         texto = datos_carta['texto_unificado']
         
@@ -274,24 +272,24 @@ else:
             "Verifica o selecciona el funcionario que solicita las vacaciones:",
             options=lista_opciones,
             index=indice_sugerido,
-            key=f"select_{archivo_pdf.name}"
+            key=f"select_{archivo_pdf.name}_{ts}"
         )
 
         st.markdown("---")
         st.markdown("### 📅 Ajusta o confirma las fechas e información extraída de la carta:")
         col1, col2 = st.columns(2)
         with col1:
-            radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'], key=f"rad_{archivo_pdf.name}")
-            fecha_rad_final = st.text_input("Fecha del Radicado:", value=datos_carta['fecha_radicado'], key=f"f_rad_{archivo_pdf.name}")
-            p_ini_final = st.text_input("Período Causado (Inicio):", value=datos_carta['periodo_inicio'], key=f"p_ini_{archivo_pdf.name}")
+            radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'], key=f"rad_{archivo_pdf.name}_{ts}")
+            fecha_rad_final = st.text_input("Fecha del Radicado:", value=datos_carta['fecha_radicado'], key=f"f_rad_{archivo_pdf.name}_{ts}")
+            p_ini_final = st.text_input("Período Causado (Inicio):", value=datos_carta['periodo_inicio'], key=f"p_ini_{archivo_pdf.name}_{ts}")
         with col2:
-            p_fin_final = st.text_input("Período Causado (Fin):", value=datos_carta['periodo_fin'], key=f"p_fin_{archivo_pdf.name}")
-            f_ini_obj_final = st.date_input("Fecha Inicio Disfrute:", value=datos_carta['fecha_inicio_obj'], key=f"f_disf_{archivo_pdf.name}")
+            p_fin_final = st.text_input("Período Causado (Fin):", value=datos_carta['periodo_fin'], key=f"p_fin_{archivo_pdf.name}_{ts}")
+            f_ini_obj_final = st.date_input("Fecha Inicio Disfrute:", value=datos_carta['fecha_inicio_obj'], key=f"f_disf_{archivo_pdf.name}_{ts}")
 
         st.markdown("---")
 
         if solicitante_elegido == OPCION_NEUTRA:
-            st.warning("⚠️ Selecciona el funcionario solicitante en la lista desplegable superior para habilitar la generación.")
+            st.warning("⚠️ Selecciona el funcionario solicitante en la lista desplegable superior para poder generar la resolución.")
         else:
             fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
             cedula_num = int(fila_encontrada['Identificación'])
@@ -318,7 +316,7 @@ else:
                 fecha_fin_str = f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
                 
                 dia_ini_str = f"{f_ini_obj_final.day:02d}" if f_ini_obj_final.day < 10 else f"{f_ini_obj_final.day}"
-                fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {fecha_inicio_formateada.year}" if 'fecha_inicio_formateada' in locals() else f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
+                fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
 
                 hoy = datetime.date.today()
                 fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
