@@ -8,7 +8,6 @@ from docx import Document
 from docx.shared import Cm, Pt
 import streamlit as st
 
-# --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
     page_title="Generador de Resoluciones SENA",
     page_icon="🏛️",
@@ -68,71 +67,68 @@ def calcular_fecha_fin(fecha_inicio, dias_habiles=15):
             fecha_actual += datetime.timedelta(days=1)
     return fecha_actual
 
-def extraer_datos_carta(file_bytes):
+def extraer_texto_limpio_pdf(file_bytes):
     lector = PdfReader(file_bytes)
     texto = ""
     for pag in lector.pages:
         txt = pag.extract_text()
         if txt:
             texto += txt + "\n"
-            
+    # Unificar espacios y saltos de línea para facilitar expresiones regulares
+    texto_unificado = " ".join(texto.split())
+    return texto, texto_unificado
+
+def extraer_datos_flexibles(texto_raw, texto_unificado):
     meses_dict = {1:"enero", 2:"febrero", 3:"marzo", 4:"abril", 5:"mayo", 6:"junio", 7:"julio", 8:"agosto", 9:"septiembre", 10:"octubre", 11:"noviembre", 12:"diciembre"}
     meses_nom = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10, "noviembre": 11, "diciembre": 12}
 
-    # 1. RADICADO DE LA ESQUINA (ej. No: 15-1-2026-004697)
-    radicado_match = re.search(r"No:\s*([\d\-]{10,25})", texto, re.IGNORECASE)
+    # 1. RADICADO
+    radicado_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{5,8})", texto_unificado)
     if not radicado_match:
-        radicado_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{5,8})", texto)
-    radicado = radicado_match.group(1).strip() if radicado_match else "15-1-2026-000000"
+        radicado_match = re.search(r"(?:No:?|Radicado|No\.)\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
+    radicado = radicado_match.group(1).strip() if radicado_match else "SIN RADICADO"
 
-    # 2. FECHA DIGITAL DEL STICKER (justo debajo del No:)
-    fecha_rad_str = "FECHA PENDIENTE"
-    sticker_match = re.search(r"No:\s*[\d\-]+\s*\n\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto, re.IGNORECASE)
-    if sticker_match:
-        dia_s = int(sticker_match.group(1))
-        mes_s = int(sticker_match.group(2))
-        ano_s = sticker_match.group(3)
-        fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'julio')} de {ano_s}"
+    # 2. FECHA DE RADICADO (Búsqueda de fechas tipo DD/MM/AAAA o escritas)
+    fecha_rad_str = None
+    fechas_dig = re.findall(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
+    if fechas_dig:
+        f = fechas_dig[0]
+        fecha_rad_str = f"{int(f[0]):02d} de {meses_dict.get(int(f[1]), 'enero')} de {f[2]}"
     else:
-        # Búsqueda secundaria de cualquier fecha digital d/m/aaaa
-        fechas_dig = re.findall(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto)
-        if fechas_dig:
-            f_d = fechas_dig[0]
-            fecha_rad_str = f"{int(f_d[0]):02d} de {meses_dict.get(int(f_d[1]), 'julio')} de {f_d[2]}"
+        fechas_txt = re.findall(r"(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
+        if fechas_txt:
+            fecha_rad_str = fechas_txt[0].strip()
 
-    # 3. AISLAR Y CORTAR ESTRICTAMENTE EL REMITENTE (Eliminar Vo. Bo., Visto Bueno, Destinatario)
-    partes_vobo = re.split(r"Vo\.\s*Bo\.|VoBo|Visto\s+Bueno", texto, flags=re.IGNORECASE)
-    texto_remitente = partes_vobo[0] # Solo lo que está ANTES del primer Vo. Bo.
+    if not fecha_rad_str:
+        hoy = datetime.date.today()
+        fecha_rad_str = f"{hoy.day:02d} de {meses_dict[hoy.month]} de {hoy.year}"
 
-    # 4. EXTRAER CÉDULA DEL SOLICITANTE
-    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", texto_remitente, re.IGNORECASE)
-    cedula_limpia = None
+    # 3. EXTRAER CÉDULAS
+    todas_cedulas = re.findall(r"(?:C\.C\.|cédula|cedula|\bNo\.\b|\bcc\b)?\s*([\d\.]{7,12})", texto_unificado, re.IGNORECASE)
+    cedulas_limpias = []
     for c in todas_cedulas:
         num = c.replace(".", "").strip()
         if num.isdigit() and 7 <= len(num) <= 10:
-            cedula_limpia = num
-            break
+            cedulas_limpias.append(num)
 
-    # 5. PERÍODO CAUSADO (Soportando saltos de línea \n)
-    texto_linea_unica = " ".join(texto.split()) # Quita saltos de línea para buscar perfecto
-    
-    periodo_match = re.search(r"(?:periodo|período)\s+causado\s+(?:del\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+al\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto_linea_unica, re.IGNORECASE)
-    if not periodo_match:
-        periodo_match = re.search(r"(?:periodo|período)\s+(?:comprendido\s+)?(?:entre\s+el\s+)?(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})\s+(?:al|y\s+el)\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})", texto_linea_unica, re.IGNORECASE)
-        
-    p_inicio = periodo_match.group(1).strip() if periodo_match else None
-    p_fin = periodo_match.group(2).strip() if periodo_match else None
+    # 4. EXTRAER DATES DEL PERÍODO CAUSADO
+    patron_fechas_periodo = re.findall(r"(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
+    p_inicio, p_fin = None, None
+    if len(patron_fechas_periodo) >= 2:
+        p_inicio = patron_fechas_periodo[0]
+        p_fin = patron_fechas_periodo[1]
 
-    # 6. FECHA DE DISFRUTE
-    disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+\w+(?:\s+de\s+\d{4})?)", texto_linea_unica, re.IGNORECASE)
+    # 5. EXTRAER FECHA DE INICIO DE DISFRUTE
     fecha_disfrute_obj = datetime.date.today()
+    disfrute_match = re.search(r"(?:a\s+partir\s+del\s+día|a\s+partir\s+del|inicio\s+el|partir\s+de)\s+(\d{1,2}\s+de\s+[a-zA-Z]+(?:\s+de\s+\d{4})?)", texto_unificado, re.IGNORECASE)
     if disfrute_match:
-        raw_disf = disfrute_match.group(1).lower().replace(".", "").strip()
-        partes = raw_disf.split()
-        d_dia = int(partes[0])
-        d_mes = meses_nom.get(partes[2], 9) if len(partes) >= 3 else 9
-        d_ano = int(partes[4]) if len(partes) >= 5 else 2026
-        fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
+        raw_d = disfrute_match.group(1).lower().replace(".", "").strip()
+        partes = raw_d.split()
+        if len(partes) >= 3:
+            d_dia = int(partes[0])
+            d_mes = meses_nom.get(partes[2], 1)
+            d_ano = int(partes[4]) if len(partes) >= 5 else datetime.date.today().year
+            fecha_disfrute_obj = datetime.date(d_ano, d_mes, d_dia)
 
     return {
         "radicado": radicado,
@@ -140,8 +136,9 @@ def extraer_datos_carta(file_bytes):
         "periodo_inicio": p_inicio,
         "periodo_fin": p_fin,
         "fecha_inicio_obj": fecha_disfrute_obj,
-        "cedula_extraida": cedula_limpia,
-        "texto_remitente": texto_remitente.upper()
+        "cedulas_encontradas": cedulas_limpias,
+        "texto_raw": texto_raw,
+        "texto_unificado": texto_unificado
     }
 
 def obtener_datos_centro_y_firmante(codigo_dep):
@@ -182,11 +179,11 @@ def obtener_datos_centro_y_firmante(codigo_dep):
             "jefe_cargo": "Director Regional Boyacá"
         }
     }
-    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["9514"])
+    return DATOS_CENTROS.get(str(codigo_dep), DATOS_CENTROS["1010"])
 
 def obtener_cargo_y_dep(nombre_empleado, cedula=None):
     cargo_oficial = "Profesional G06"
-    codigo_dep = "9514"
+    codigo_dep = "1010"
 
     if not MAESTRO_CARGOS or not os.path.exists(MAESTRO_CARGOS):
         return cargo_oficial, codigo_dep
@@ -247,8 +244,9 @@ else:
         st.info("📄 Carta cargada con éxito. Haz clic abajo para procesar la resolución.")
         
         if st.button("⚡ Generar Resolución en Word"):
-            with st.spinner("Buscando coincidencia exacta del remitente en la base Kactus..."):
-                datos_carta = extraer_datos_carta(archivo_pdf)
+            with st.spinner("Analizando documento y buscando solicitante en la base Kactus..."):
+                texto_raw, texto_unificado = extraer_texto_limpio_pdf(archivo_pdf)
+                datos_carta = extraer_datos_flexibles(texto_raw, texto_unificado)
                 
                 xls = pd.ExcelFile(EXCEL_HISTORIAL)
                 nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
@@ -256,15 +254,17 @@ else:
 
                 fila_encontrada = None
                 
-                # 1. Buscar por Cédula extraída del área exclusiva del remitente
-                if datos_carta['cedula_extraida']:
-                    filas = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_extraida'])]
+                # 1. Cruzar por cualquier Cédula encontrada en la carta
+                for cc in datos_carta['cedulas_encontradas']:
+                    filas = df_kactus[df_kactus['Identificación'].astype(str).str.contains(cc)]
                     if not filas.empty:
                         fila_encontrada = filas.iloc[0]
+                        break
                 
-                # 2. Buscar por nombre en la sección del remitente (SIN VO. BO.)
+                # 2. Si no hay cédula, buscar nombres de la base Kactus presentes en la carta,
+                # omitiendo intencionalmente cargos directivos (Directora Regional, Coordinador, etc.)
                 if fila_encontrada is None:
-                    texto_rem = datos_carta['texto_remitente']
+                    candidatos = []
                     for idx, fila in df_kactus.iterrows():
                         nom = str(fila['Nombre del Empleado']).strip().upper()
                         ape = str(fila['Apellidos Empleado']).strip().upper()
@@ -272,12 +272,17 @@ else:
                         p_ape = ape.split()[0] if ape else ""
                         
                         if len(p_nom) > 2 and len(p_ape) > 2:
-                            if p_nom in texto_rem and p_ape in texto_rem:
-                                fila_encontrada = fila
-                                break
+                            if p_nom in texto_unificado.upper() and p_ape in texto_unificado.upper():
+                                # Descartar directores/coordinadores si aparecen en el destinatario o VoBo
+                                if "DIRECTOR" not in f"{nom} {ape}" and "COORDINADOR" not in f"{nom} {ape}":
+                                    candidatos.append(fila)
+
+                    if candidatos:
+                        # Seleccionar el candidato solicitante
+                        fila_encontrada = candidatos[0]
 
                 if fila_encontrada is None:
-                    st.error("❌ No se pudo identificar al remitente del PDF en la base Kactus.")
+                    st.error("❌ No se pudo identificar al funcionario solicitante en la base Kactus. Verifica que el nombre o cédula coincida con el Excel.")
                 else:
                     cedula_num = int(fila_encontrada['Identificación'])
                     cedula_puntos = f"{cedula_num:,}".replace(",", ".")
@@ -305,8 +310,12 @@ else:
                     dia_ini_str = f"{f_ini_obj.day:02d}" if f_ini_obj.day < 10 else f"{f_ini_obj.day}"
                     fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj.month - 1]} de {f_ini_obj.year}"
 
-                    p_ini = datos_carta['periodo_inicio'] if datos_carta['periodo_inicio'] else "01 de enero de 2025"
-                    p_fin = datos_carta['periodo_fin'] if datos_carta['periodo_fin'] else "31 de diciembre de 2025"
+                    # Si el período causado no vino en la carta, tomar del Excel Kactus
+                    p_ini = datos_carta['periodo_inicio']
+                    p_fin = datos_carta['periodo_fin']
+                    if not p_ini or not p_fin:
+                        p_ini = "01 de enero de 2025"
+                        p_fin = "31 de diciembre de 2025"
 
                     hoy = datetime.date.today()
                     fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
@@ -347,8 +356,8 @@ else:
                     st.write(f"👤 **Solicitante:** {texto_funcionario.capitalize()} **{nombre_completo}**")
                     st.write(f"🔢 **Radicado Extraído:** **{datos_carta['radicado']}** del **{datos_carta['fecha_radicado']}**")
                     st.write(f"💼 **Cargo:** {cargo} | **Centro:** {info_centro['centro']}")
-                    st.write(f"📅 **Período Causado Extraído:** Del **{p_ini}** al **{p_fin}**")
-                    st.write(f"🏖️ **Disfrute (15 Días Hábiles):** Del {fecha_inicio_formateada} al {fecha_fin_str}")
+                    st.write(f"📅 **Período Causado:** Del **{p_ini}** al **{p_fin}**")
+                    st.write(f"🏖️ **Disfrute (15 Días Hábiles):** Del **{fecha_inicio_formateada}** al **{fecha_fin_str}**")
 
                     with open(salida_path, "rb") as file_docx:
                         st.download_button(
