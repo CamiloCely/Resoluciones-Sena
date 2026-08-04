@@ -106,7 +106,7 @@ def extraer_datos_pdf_dinamico(file_bytes):
         ano_s = sticker_match.group(3)
         fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
 
-    # 3. PERÍODO CAUSADO (Soporta formatos numéricos DD/MM/AAAA y en texto)
+    # 3. PERÍODO CAUSADO
     p_inicio, p_fin = "29 de septiembre de 2024", "29 de septiembre de 2025"
     per_num = re.search(r"laborado\s+(?:del|desde\s+el)\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})\s+(?:al|hasta\s+el)\s+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})", texto_unificado, re.IGNORECASE)
     if per_num:
@@ -252,12 +252,14 @@ else:
         
         lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        # ALGORITMO ROBUSTO DE COINCIDENCIA DE NOMBRES
-        indice_sugerido = None
+        OPCION_NEUTRA = "--- SELECCIONE EL FUNCIONARIO ---"
+        lista_opciones = [OPCION_NEUTRA] + lista_funcionarios
+
+        # COINCIDENCIA DE TEXTO CON PALABRAS CLAVE
+        indice_sugerido = 0
         texto = datos_carta['texto_unificado']
         
-        # 1. Búsqueda por 2 o más palabras clave (Nombre + Apellido)
-        for idx, nom in enumerate(lista_funcionarios):
+        for idx, nom in enumerate(lista_funcionarios, start=1):
             partes = [p for p in nom.split() if len(p) > 2]
             coincidencias = sum(1 for p in partes if p in texto)
             if coincidencias >= 2:
@@ -265,32 +267,15 @@ else:
                     indice_sugerido = idx
                     break
 
-        # Si no hay coincidencia directa de 2 palabras, buscar por apellido único
-        if indice_sugerido is None:
-            for idx, nom in enumerate(lista_funcionarios):
-                partes = [p for p in nom.split() if len(p) > 3]
-                if any(p in texto for p in partes):
-                    if not any(excl in nom for excl in ["ENITH", "NIDIA", "GUSTAVO", "DIRECTOR", "COORDINADOR"]):
-                        indice_sugerido = idx
-                        break
-
-        index_final = indice_sugerido if indice_sugerido is not None else 0
-
         st.success(f"📄 Carta '{archivo_pdf.name}' cargada correctamente.")
         st.markdown("### 👤 Confirmación del Solicitante:")
         
         solicitante_elegido = st.selectbox(
             "Verifica o selecciona el funcionario que solicita las vacaciones:",
-            options=lista_funcionarios,
-            index=index_final,
+            options=lista_opciones,
+            index=indice_sugerido,
             key=f"select_{archivo_pdf.name}"
         )
-
-        fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
-        
-        cedula_num = int(fila_encontrada['Identificación'])
-        cedula_puntos = f"{cedula_num:,}".replace(",", ".")
-        nombre_completo = solicitante_elegido
 
         st.markdown("---")
         st.markdown("### 📅 Ajusta o confirma las fechas e información extraída de la carta:")
@@ -305,67 +290,75 @@ else:
 
         st.markdown("---")
 
-        if st.button("⚡ Generar Resolución en Word"):
-            genero = str(fila_encontrada.get('Sexo', '')).upper()
-            if 'F' in genero or nombre_completo.startswith(('MYRIAM', 'BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
-                texto_funcionario = "la funcionaria"
-                texto_funcionario_a = "a la funcionaria"
-            else:
-                texto_funcionario = "el funcionario"
-                texto_funcionario_a = "al funcionario"
+        if solicitante_elegido == OPCION_NEUTRA:
+            st.warning("⚠️ Selecciona el funcionario solicitante en la lista desplegable superior para habilitar la generación.")
+        else:
+            fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
+            cedula_num = int(fila_encontrada['Identificación'])
+            cedula_puntos = f"{cedula_num:,}".replace(",", ".")
+            nombre_completo = solicitante_elegido
 
-            cargo, cod_dep = obtener_cargo_y_dep(nombre_completo, str(cedula_num))
-            info_centro = obtener_datos_centro_y_firmante(cod_dep)
-            
-            meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
-            
-            fecha_fin_obj = calcular_fecha_fin(f_ini_obj_final, 15)
-            
-            dia_fin_str = f"{fecha_fin_obj.day:02d}" if fecha_fin_obj.day < 10 else f"{fecha_fin_obj.day}"
-            fecha_fin_str = f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
-            
-            dia_ini_str = f"{f_ini_obj_final.day:02d}" if f_ini_obj_final.day < 10 else f"{f_ini_obj_final.day}"
-            fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
+            if st.button("⚡ Generar Resolución en Word"):
+                genero = str(fila_encontrada.get('Sexo', '')).upper()
+                if 'F' in genero or nombre_completo.startswith(('MYRIAM', 'BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO')):
+                    texto_funcionario = "la funcionaria"
+                    texto_funcionario_a = "a la funcionaria"
+                else:
+                    texto_funcionario = "el funcionario"
+                    texto_funcionario_a = "al funcionario"
 
-            hoy = datetime.date.today()
-            fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
+                cargo, cod_dep = obtener_cargo_y_dep(nombre_completo, str(cedula_num))
+                info_centro = obtener_datos_centro_y_firmante(cod_dep)
+                
+                meses_esp = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+                
+                fecha_fin_obj = calcular_fecha_fin(f_ini_obj_final, 15)
+                
+                dia_fin_str = f"{fecha_fin_obj.day:02d}" if fecha_fin_obj.day < 10 else f"{fecha_fin_obj.day}"
+                fecha_fin_str = f"{dia_fin_str} de {meses_esp[fecha_fin_obj.month - 1]} de {fecha_fin_obj.year}"
+                
+                dia_ini_str = f"{f_ini_obj_final.day:02d}" if f_ini_obj_final.day < 10 else f"{f_ini_obj_final.day}"
+                fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {fecha_inicio_formateada.year}" if 'fecha_inicio_formateada' in locals() else f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
 
-            doc = Document(PLANTILLA_WORD)
-            
-            reemplazos = {
-                "[TITULO_DIRECTOR_COMPLETO]": info_centro["titulo_encabezado"],
-                "[TEXTO_FUNCIONARIO]": texto_funcionario,
-                "[TEXTO_FUNCIONARIO_A]": texto_funcionario_a,
-                "[NOMBRE_EMPLEADO]": nombre_completo,
-                "[CEDULA]": cedula_puntos,
-                "[CARGO]": cargo,
-                "[CENTRO_FORMACION]": info_centro["centro"],
-                "[RADICADO]": radicado_final,
-                "[FECHA_RADICADO]": fecha_rad_final,
-                "[FECHA_INICIO]": fecha_inicio_formateada,
-                "[FECHA_FIN]": fecha_fin_str,
-                "[PERIODO_INICIO]": p_ini_final,
-                "[PERIODO_FIN]": p_fin_final,
-                "[CIUDAD_CENTRO]": info_centro["ciudad"],
-                "[FECHA_HOY]": fecha_hoy_str,
-                "[NOMBRE_JEFE_FIRMA]": info_centro["jefe_nombre"],
-                "[CARGO_JEFE_FIRMA]": info_centro["jefe_cargo"]
-            }
-            
-            reemplazar_respetando_formato(doc, reemplazos)
+                hoy = datetime.date.today()
+                fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
 
-            timestamp_unico = int(time.time())
-            nombre_archivo_salida = f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}_{timestamp_unico}.docx"
-            salida_path = os.path.join(BASE_DIR, nombre_archivo_salida)
-            doc.save(salida_path)
+                doc = Document(PLANTILLA_WORD)
+                
+                reemplazos = {
+                    "[TITULO_DIRECTOR_COMPLETO]": info_centro["titulo_encabezado"],
+                    "[TEXTO_FUNCIONARIO]": texto_funcionario,
+                    "[TEXTO_FUNCIONARIO_A]": texto_funcionario_a,
+                    "[NOMBRE_EMPLEADO]": nombre_completo,
+                    "[CEDULA]": cedula_puntos,
+                    "[CARGO]": cargo,
+                    "[CENTRO_FORMACION]": info_centro["centro"],
+                    "[RADICADO]": radicado_final,
+                    "[FECHA_RADICADO]": fecha_rad_final,
+                    "[FECHA_INICIO]": fecha_inicio_formateada,
+                    "[FECHA_FIN]": fecha_fin_str,
+                    "[PERIODO_INICIO]": p_ini_final,
+                    "[PERIODO_FIN]": p_fin_final,
+                    "[CIUDAD_CENTRO]": info_centro["ciudad"],
+                    "[FECHA_HOY]": fecha_hoy_str,
+                    "[NOMBRE_JEFE_FIRMA]": info_centro["jefe_nombre"],
+                    "[CARGO_JEFE_FIRMA]": info_centro["jefe_cargo"]
+                }
+                
+                reemplazar_respetando_formato(doc, reemplazos)
 
-            st.balloons()
-            st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo}!")
+                timestamp_unico = int(time.time())
+                nombre_archivo_salida = f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}_{timestamp_unico}.docx"
+                salida_path = os.path.join(BASE_DIR, nombre_archivo_salida)
+                doc.save(salida_path)
 
-            with open(salida_path, "rb") as file_docx:
-                st.download_button(
-                    label=f"📥 DESCARGAR RESOLUCIÓN DE {nombre_completo}",
-                    data=file_docx,
-                    file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+                st.balloons()
+                st.success(f"✅ ¡Resolución generada con éxito para {nombre_completo}!")
+
+                with open(salida_path, "rb") as file_docx:
+                    st.download_button(
+                        label=f"📥 DESCARGAR RESOLUCIÓN DE {nombre_completo}",
+                        data=file_docx,
+                        file_name=f"Resolucion_Vacaciones_{nombre_completo.replace(' ', '_')}.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    )
