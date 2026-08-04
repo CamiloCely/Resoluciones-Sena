@@ -81,13 +81,13 @@ def extraer_datos_pdf(file_bytes):
 
     texto_unificado = " ".join(texto.split())
 
-    # 1. RADICADO
+    # 1. RADICADO (15-1-2026-004935)
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{5,8})", texto_unificado)
     if not rad_match:
         rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
     radicado = rad_match.group(1).strip() if rad_match else "15-1-2026-004935"
 
-    # 2. FECHA DE RADICADO
+    # 2. FECHA DE RADICADO (Del sticker: 3/8/2026 -> 03 de agosto de 2026)
     fecha_rad_str = "03 de agosto de 2026"
     sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
     if sticker_match:
@@ -96,12 +96,12 @@ def extraer_datos_pdf(file_bytes):
         ano_s = sticker_match.group(3)
         fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'agosto')} de {ano_s}"
 
-    # 3. DATES DEL PERÍODO CAUSADO
+    # 3. DATES DEL PERÍODO CAUSADO (24 de agosto de 2024 al 23 de agosto de 2025)
     patron_fechas = re.findall(r"(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
     p_inicio = patron_fechas[0] if len(patron_fechas) >= 1 else "24 de agosto de 2024"
     p_fin = patron_fechas[1] if len(patron_fechas) >= 2 else "23 de agosto de 2025"
 
-    # 4. FECHA DE DISFRUTE
+    # 4. FECHA DE DISFRUTE (31 de Agosto de 2026)
     disfrute_match = re.search(r"(?:a\s+partir\s+del\s+día|a\s+partir\s+del|inicio\s+el|partir\s+de)\s+(\d{1,2}\s+de\s+[a-zA-Z]+(?:\s+de\s+\d{4})?)", texto_unificado, re.IGNORECASE)
     fecha_disfrute_obj = datetime.date(2026, 8, 31)
     if disfrute_match:
@@ -228,21 +228,25 @@ else:
         nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
         df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
 
-        # Crear columna limpia asegurando conversión a string (evita el TypeError)
         nombres_limpios = df_kactus['Nombre del Empleado'].fillna('').astype(str)
         apellidos_limpios = df_kactus['Apellidos Empleado'].fillna('').astype(str)
         df_kactus['Nombre_Completo'] = (nombres_limpios + " " + apellidos_limpios).str.strip().str.upper()
         
-        # Filtrar valores no vacíos
         lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        # Pre-selección inteligente
+        # BÚSQUEDA PRECISA DEL SOLICITANTE EN EL PDF
         indice_sugerido = 0
+        encontrado_exacto = False
+        
         for idx, nom in enumerate(lista_funcionarios):
-            p_nom = nom.split()[0] if nom else ""
-            if p_nom and p_nom in datos_carta['texto_completo'] and "ENITH" not in nom and "NIDIA" not in nom:
-                indice_sugerido = idx
-                break
+            partes = nom.split()
+            if len(partes) >= 2:
+                # Si el primer nombre y primer apellido están en el PDF (y no es Enith/Nidia)
+                if partes[0] in datos_carta['texto_completo'] and partes[-1] in datos_carta['texto_completo']:
+                    if "ENITH" not in nom and "NIDIA" not in nom:
+                        indice_sugerido = idx
+                        encontrado_exacto = True
+                        break
 
         st.success("📄 Carta analizada correctamente.")
         st.markdown("### 👤 Confirmación del Solicitante:")
