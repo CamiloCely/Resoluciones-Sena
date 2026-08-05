@@ -26,8 +26,10 @@ def obtener_archivo_existente(extensiones, prefijo=""):
                 return os.path.join(BASE_DIR, f)
     return None
 
-EXCEL_HISTORIAL = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx") if os.path.exists(os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")) else obtener_archivo_existente(('.xlsx', '.xls'))
-PLANTILLA_WORD = obtener_archivo_existente(('.docx',))
+# Intentar precargar archivos si existen localmente
+file_excel_local = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx") if os.path.exists(os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")) else obtener_archivo_existente(('.xlsx', '.xls'))
+file_maestro_local = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else obtener_archivo_existente(('.pdf',), prefijo="MAESTRO")
+file_word_local = obtener_archivo_existente(('.docx',))
 
 FESTIVOS_COLOMBIA = [
     datetime.date(2026, 1, 1),   datetime.date(2026, 1, 12),  datetime.date(2026, 3, 23),
@@ -73,7 +75,7 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
     if match_fecha_txt:
         fecha_rad_str = f"{int(match_fecha_txt.group(1)):02d} de {meses_dict.get(int(match_fecha_txt.group(2)), 'julio')} de {match_fecha_txt.group(3)}"
 
-    # Cédula del solicitante (buscando expresiones tipo "Cedula NO. XX.XXX.XXX")
+    # Cédula del solicitante (buscando patrones en la firma/cuerpo)
     cedula_solicitante = ""
     ced_match = re.search(r"(?:Cedula|C\.C\.|Cédula)\s*(?:NO\.|No\.)?\s*([\d\.]+)", texto_unificado, re.IGNORECASE)
     if ced_match:
@@ -87,7 +89,7 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
         p_fin = f"31 de diciembre de {periodo_match.group(2)}"
 
     # Fecha Inicio Disfrute (Ej: ENTRE 7 DE SEPTIEMBRE Y 25 SEPTIEMBRE 2026)
-    fecha_disfrute_obj = datetime.date(2026, 9, 7) # Valor por defecto seguro si coincide
+    fecha_disfrute_obj = datetime.date(2026, 9, 7)
     disfrute_match = re.search(r"(?:entre|a partir del)\s+(\d{1,2})\s+de\s+([a-zA-Z]+)(?:\s+de\s+(\d{4}))?", texto_unificado, re.IGNORECASE)
     if disfrute_match:
         dia = int(disfrute_match.group(1))
@@ -124,31 +126,58 @@ def reemplazar_respetando_formato(doc, dic_reemplazos):
                 for p in celda.paragraphs:
                     procesar_p(p)
 
-# --- BARRA LATERAL ---
+# --- BARRA LATERAL (GESTIÓN DE BASES Y PLATAFORMA) ---
 with st.sidebar:
-    st.header("⚙️ Configuración y Bases")
-    uploaded_excel = st.file_uploader("Actualizar Excel Kactus (.xlsx)", type=["xlsx", "xls"], key="excel_uploader")
-    if uploaded_excel:
-        path_tmp = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")
-        with open(path_tmp, "wb") as f:
-            f.write(uploaded_excel.getbuffer())
-        EXCEL_HISTORIAL = path_tmp
-        st.success("✅ Base KactuS actualizada.")
+    st.header("⚙️ Configuración y Bases de Datos")
+    
+    st.subheader("1. Base de Datos KactuS (.xlsx)")
+    up_excel = st.file_uploader("Actualizar Excel Kactus", type=["xlsx", "xls"], key="up_excel")
+    if up_excel:
+        path_tmp_e = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")
+        with open(path_tmp_e, "wb") as f:
+            f.write(up_excel.getbuffer())
+        file_excel_local = path_tmp_e
+        st.success("✅ Excel KactuS cargado.")
+
+    st.subheader("2. Maestro de Cargos PDF")
+    up_maestro = st.file_uploader("Actualizar Maestro por Dependencias (.pdf)", type=["pdf"], key="up_maestro")
+    if up_maestro:
+        path_tmp_m = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")
+        with open(path_tmp_m, "wb") as f:
+            f.write(up_maestro.getbuffer())
+        file_maestro_local = path_tmp_m
+        st.success("✅ Maestro de Cargos cargado.")
+
+    st.subheader("3. Plantilla Oficial Word (.docx)")
+    up_word = st.file_uploader("Actualizar Plantilla Word", type=["docx"], key="up_word")
+    if up_word:
+        path_tmp_w = os.path.join(BASE_DIR, "Plantilla_Resolucion.docx")
+        with open(path_tmp_w, "wb") as f:
+            f.write(up_word.getbuffer())
+        file_word_local = path_tmp_w
+        st.success("✅ Plantilla Word cargada.")
+
+    st.markdown("---")
+    st.markdown("### 📊 Estado actual:")
+    st.write(f"• **Kactus Excel:** {'✅ Activo' if file_excel_local else '❌ Pendiente'}")
+    st.write(f"• **Maestro Cargos:** {'✅ Activo' if file_maestro_local else '❌ Pendiente'}")
+    st.write(f"• **Plantilla Word:** {'✅ Activo' if file_word_local else '❌ Pendiente'}")
 
 # --- CONTENIDO PRINCIPAL ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
+st.markdown("Carga la carta de solicitud enviada por el funcionario (PDF) para generar la resolución oficial en Word.")
 
-if not EXCEL_HISTORIAL or not PLANTILLA_WORD:
-    st.warning("⚠️ Asegúrate de tener cargados los archivos base en GitHub o la barra lateral.")
+if not file_excel_local or not file_word_local:
+    st.warning("⚠️ Debes subir el **Excel de KactuS** y la **Plantilla Word** en la barra lateral antes de continuar.")
 else:
-    archivo_pdf = st.file_uploader("Carga la carta de solicitud (.pdf)", type=["pdf"], key="pdf_uploader")
+    archivo_pdf = st.file_uploader("Carga aquí la carta de solicitud (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
         datos_carta = extraer_datos_pdf(archivo_pdf, archivo_pdf.name)
         
-        xls = pd.ExcelFile(EXCEL_HISTORIAL)
+        xls = pd.ExcelFile(file_excel_local)
         nombre_hoja = 'KactuS - KNmVacac' if 'KactuS - KNmVacac' in xls.sheet_names else xls.sheet_names[0]
-        df_kactus = pd.read_excel(EXCEL_HISTORIAL, sheet_name=nombre_hoja)
+        df_kactus = pd.read_excel(file_excel_local, sheet_name=nombre_hoja)
 
         nombres_limpios = df_kactus['Nombre del Empleado'].fillna('').astype(str)
         apellidos_limpios = df_kactus['Apellidos Empleado'].fillna('').astype(str)
@@ -156,7 +185,7 @@ else:
         
         lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        # Búsqueda precisa por Cédula extraída o Nombre
+        # Búsqueda precisa de Consuelo Milena o por Cédula (46.672.632)
         indice_sugerido = 0
         if datos_carta['cedula_solicitante']:
             filas_c = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_solicitante'])]
@@ -164,6 +193,13 @@ else:
                 nom_c = filas_c.iloc[0]['Nombre_Completo']
                 if nom_c in lista_funcionarios:
                     indice_sugerido = lista_funcionarios.index(nom_c)
+        else:
+            # Buscar por nombre en el texto completo de la carta
+            for i, nom in enumerate(lista_funcionarios):
+                partes_nom = nom.split()
+                if len(partes_nom) >= 2 and partes_nom[0] in datos_carta['texto_completo'] and partes_nom[1] in datos_carta['texto_completo']:
+                    indice_sugerido = i
+                    break
 
         st.success("📄 Carta analizada correctamente.")
         
@@ -192,9 +228,11 @@ else:
             p_fin_final = st.text_input("Período Causado (Fin):", value=datos_carta['periodo_fin'])
             f_ini_obj_final = st.date_input("Fecha Inicio Disfrute:", value=datos_carta['fecha_inicio_obj'])
 
+        st.markdown("---")
+
         if st.button("⚡ Generar Resolución en Word", type="primary"):
             genero = str(fila_encontrada.get('Sexo', '')).upper()
-            if 'F' in genero or nombre_completo.startswith(('CONSUELO', 'MARIA', 'BLANCA', 'ANGELA', 'NEILA', 'ENITH')):
+            if 'F' in genero or nombre_completo.startswith(('CONSUELO', 'MARIA', 'BLANCA', 'ANGELA', 'NEILA', 'ENITH', 'YADIRA', 'MILENA')):
                 texto_funcionario = "la funcionaria"
                 texto_funcionario_a = "a la funcionaria"
             else:
@@ -211,9 +249,9 @@ else:
             fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
 
             hoy = datetime.date.today()
-            fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
+            fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {fecha_hoy_str if 'fecha_hoy_str' in locals() else hoy.year}"
 
-            doc = Document(PLANTILLA_WORD)
+            doc = Document(file_word_local)
             
             reemplazos = {
                 "[TITULO_DIRECTOR_COMPLETO]": "DIRECTOR REGIONAL DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
@@ -230,7 +268,7 @@ else:
                 "[PERIODO_INICIO]": p_ini_final,
                 "[PERIODO_FIN]": p_fin_final,
                 "[CIUDAD_CENTRO]": "Sogamoso",
-                "[FECHA_HOY]": fecha_hoy_str,
+                "[FECHA_HOY]": f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}",
                 "[NOMBRE_JEFE_FIRMA]": "Director Regional",
                 "[CARGO_JEFE_FIRMA]": "Director Regional Boyacá"
             }
@@ -243,7 +281,7 @@ else:
             doc.save(salida_path)
 
             st.balloons()
-            st.success(f"✅ ¡Resolución generada para {nombre_completo}!")
+            st.success(f"✅ ¡Resolución generada exitosamente para {nombre_completo}!")
 
             with open(salida_path, "rb") as file_docx:
                 st.download_button(
