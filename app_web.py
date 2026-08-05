@@ -79,7 +79,7 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
 
     texto_unificado = " ".join(texto.split())
 
-    # 1. RADICADO (Texto PDF o Nombre de archivo)
+    # 1. RADICADO
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", texto_unificado)
     if not rad_match:
         rad_match = re.search(r"No:\s*([\d\-]{10,25})", texto_unificado, re.IGNORECASE)
@@ -90,8 +90,6 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
 
     # 2. FECHA DE RADICACIÓN MULTINIVEL
     fecha_rad_str = ""
-    
-    # Nivel A: Buscar fecha redactada en encabezado (ej: "09 de junio de 2026" o "9 de junio de 2026")
     match_fecha_txt = re.search(r"(\d{1,2})\s+de\s+([a-zA-Z]+)\s+de\s+(\d{4})", texto_unificado, re.IGNORECASE)
     if match_fecha_txt:
         d_txt = int(match_fecha_txt.group(1))
@@ -99,7 +97,6 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
         a_txt = match_fecha_txt.group(3)
         fecha_rad_str = f"{d_txt:02d} de {m_txt} de {a_txt}"
 
-    # Nivel B: Buscar formato numérico en sticker (ej: "09/06/2026" o "09-06-2026")
     if not fecha_rad_str:
         sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
         if sticker_match:
@@ -108,7 +105,6 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
             ano_s = sticker_match.group(3)
             fecha_rad_str = f"{dia_s:02d} de {meses_dict.get(mes_s, 'junio')} de {ano_s}"
 
-    # Nivel C: Fallback a la fecha actual si no detecta fecha en la carta
     if not fecha_rad_str:
         hoy_temp = datetime.date.today()
         fecha_rad_str = f"{hoy_temp.day:02d} de {meses_dict.get(hoy_temp.month, 'junio')} de {hoy_temp.year}"
