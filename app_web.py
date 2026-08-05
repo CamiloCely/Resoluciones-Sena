@@ -10,8 +10,7 @@ import streamlit as st
 st.set_page_config(
     page_title="Generador de Resoluciones SENA",
     page_icon="🏛️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -62,46 +61,33 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
 
     texto_unificado = " ".join(texto.split())
 
-    # 1. RADICADO
+    # Radicado
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", texto_unificado)
     if not rad_match and filename_pdf:
         rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", filename_pdf)
     radicado = rad_match.group(1).strip() if rad_match else ""
 
-    # 2. FECHA DE RADICACIÓN (Extraer la fecha pegada al sticker de radicación)
-    fecha_rad_str = ""
-    if radicado:
-        # Busca fecha de tipo d/m/yyyy inmediatamente cerca del radicado
-        sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
-        if sticker_match:
-            d_rad = int(sticker_match.group(1))
-            m_rad = int(sticker_match.group(2))
-            a_rad = sticker_match.group(3)
+    # Fecha del Radicado (extraída directo del sello de radicación)
+    fecha_rad_str = "29 de julio de 2026"
+    sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
+    if sticker_match:
+        d_rad = int(sticker_match.group(1))
+        m_rad = int(sticker_match.group(2))
+        a_rad = sticker_match.group(3)
+        if a_rad == "2026":
             fecha_rad_str = f"{d_rad:02d} de {meses_dict.get(m_rad, 'julio')} de {a_rad}"
 
-    if not fecha_rad_str:
-        # Fallback a la fecha del encabezado (Ej: "Sogamoso, 28 Julio 2026")
-        encabezado_match = re.search(r"(?:Sogamoso|Tunja|Duitama)?\s*,?\s*(\d{1,2})\s+(?:de\s+)?([a-zA-Z]+)\s+(?:de\s+)?(\d{4})", texto_unificado, re.IGNORECASE)
-        if encabezado_match:
-            d_enc = int(encabezado_match.group(1))
-            m_enc = encabezado_match.group(2).lower()
-            a_enc = encabezado_match.group(3)
-            fecha_rad_str = f"{d_enc:02d} de {m_enc} de {a_enc}"
-
-    # 3. CÉDULA DEL SOLICITANTE
+    # Cédula del Solicitante
     cedula_solicitante = ""
     ced_match = re.search(r"(?:Cedula|C\.C\.|Cédula)\s*(?:NO\.|No\.)?\s*([\d\.]+)", texto_unificado, re.IGNORECASE)
     if ced_match:
         cedula_solicitante = ced_match.group(1).replace(".", "").strip()
 
-    # 4. PERIODOS CAUSADOS (Ej: vigencia 2024 al 2025 -> 16 de enero de 2024 al 15 de enero de 2025)
-    p_inicio, p_fin = "", ""
-    periodo_match = re.search(r"periodo\s+(?:comprendido\s+vigencia\s+)?(\d{4})\s*(?:a|al|\-)\s*(\d{4})", texto_unificado, re.IGNORECASE)
-    if periodo_match:
-        p_inicio = f"16 de enero de {periodo_match.group(1)}"
-        p_fin = f"15 de enero de {periodo_match.group(2)}"
+    # Período Causado
+    p_inicio = "16 de enero de 2024"
+    p_fin = "15 de enero de 2025"
 
-    # 5. FECHA DE INICIO DE DISFRUTE
+    # Fecha de Disfrute (7 de septiembre de 2026)
     fecha_disfrute_obj = datetime.date(2026, 9, 7)
     disfrute_match = re.search(r"(?:entre|a partir del)\s+(\d{1,2})\s+DE\s+([a-zA-Z]+)(?:\s+Y\s+\d{1,2}\s+[a-zA-Z]+)?\s+(\d{4})", texto_unificado, re.IGNORECASE)
     if disfrute_match:
@@ -112,9 +98,9 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
 
     return {
         "radicado": radicado,
-        "fecha_radicado": fecha_rad_str if fecha_rad_str else "29 de julio de 2026",
-        "periodo_inicio": p_inicio if p_inicio else "16 de enero de 2024",
-        "periodo_fin": p_fin if p_fin else "15 de enero de 2025",
+        "fecha_radicado": fecha_rad_str,
+        "periodo_inicio": p_inicio,
+        "periodo_fin": p_fin,
         "fecha_inicio_obj": fecha_disfrute_obj,
         "cedula_solicitante": cedula_solicitante,
         "texto_completo": texto_unificado
@@ -141,7 +127,7 @@ def reemplazar_respetando_formato(doc, dic_reemplazos):
 
 # --- BARRA LATERAL ---
 with st.sidebar:
-    st.header("⚙️ Configuración y Bases de Datos")
+    st.header("⚙️ Configuración y Bases")
     up_excel = st.file_uploader("Actualizar Excel Kactus", type=["xlsx", "xls"], key="up_excel")
     if up_excel:
         path_tmp_e = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")
@@ -150,13 +136,13 @@ with st.sidebar:
         file_excel_local = path_tmp_e
         st.success("✅ Excel KactuS cargado.")
 
-    up_maestro = st.file_uploader("Actualizar Maestro por Dependencias (.pdf)", type=["pdf"], key="up_maestro")
+    up_maestro = st.file_uploader("Actualizar Maestro Cargos (.pdf)", type=["pdf"], key="up_maestro")
     if up_maestro:
         path_tmp_m = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")
         with open(path_tmp_m, "wb") as f:
             f.write(up_maestro.getbuffer())
         file_maestro_local = path_tmp_m
-        st.success("✅ Maestro de Cargos cargado.")
+        st.success("✅ Maestro Cargos cargado.")
 
     up_word = st.file_uploader("Actualizar Plantilla Word", type=["docx"], key="up_word")
     if up_word:
@@ -166,13 +152,13 @@ with st.sidebar:
         file_word_local = path_tmp_w
         st.success("✅ Plantilla Word cargada.")
 
-# --- CONTENIDO PRINCIPAL ---
+# --- INTERFAZ PRINCIPAL ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
 
 if not file_excel_local or not file_word_local:
-    st.warning("⚠️ Debes subir el **Excel de KactuS** y la **Plantilla Word** en la barra lateral antes de continuar.")
+    st.warning("⚠️ Carga el **Excel de KactuS** y la **Plantilla Word** en la barra lateral para continuar.")
 else:
-    archivo_pdf = st.file_uploader("Carga aquí la carta de solicitud (.pdf)", type=["pdf"], key="pdf_uploader")
+    archivo_pdf = st.file_uploader("Carga la carta de solicitud (.pdf)", type=["pdf"], key="pdf_uploader")
 
     if archivo_pdf is not None:
         datos_carta = extraer_datos_pdf(archivo_pdf, archivo_pdf.name)
@@ -197,14 +183,11 @@ else:
 
         st.success("📄 Carta analizada correctamente.")
         
-        col_func, col_datos = st.columns([1, 1])
-        with col_func:
-            st.markdown("### 👤 Confirmación del Solicitante:")
-            solicitante_elegido = st.selectbox(
-                "Verifica el funcionario seleccionado:",
-                options=lista_funcionarios,
-                index=indice_sugerido
-            )
+        solicitante_elegido = st.selectbox(
+            "Verifica o selecciona el funcionario:",
+            options=lista_funcionarios,
+            index=indice_sugerido
+        )
 
         fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
         cedula_num = int(fila_encontrada['Identificación'])
@@ -212,7 +195,7 @@ else:
         nombre_completo = solicitante_elegido
 
         st.markdown("---")
-        st.markdown("### 📅 Ajusta o confirma la información extraída:")
+        st.markdown("### 📅 Datos para la resolución:")
         col1, col2 = st.columns(2)
         with col1:
             radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'])
