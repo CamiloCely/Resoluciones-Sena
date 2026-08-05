@@ -7,24 +7,33 @@ from pypdf import PdfReader
 from docx import Document
 import streamlit as st
 
+# Configuración de página con la barra lateral abierta por defecto
 st.set_page_config(
     page_title="Generador de Resoluciones SENA",
     page_icon="🏛️",
-    layout="centered"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# --- ARCHIVOS HISTÓRICOS Y PLANTILLAS ---
-archivos_excel = [f for f in os.listdir(BASE_DIR) if f.lower().endswith(('.xlsx', '.xls'))]
-EXCEL_HISTORIAL = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx") if os.path.exists(os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")) else (os.path.join(BASE_DIR, archivos_excel[0]) if archivos_excel else None)
+# --- GESTIÓN DE ARCHIVOS ---
+def obtener_archivo_existente(extensiones, prefijo=""):
+    for f in os.listdir(BASE_DIR):
+        if f.lower().endswith(extensiones) and not f.startswith('~$'):
+            if prefijo:
+                if prefijo.lower() in f.lower():
+                    return os.path.join(BASE_DIR, f)
+            else:
+                return os.path.join(BASE_DIR, f)
+    return None
 
-archivos_word = [f for f in os.listdir(BASE_DIR) if f.lower().endswith('.docx') and not f.startswith('~$')]
-PLANTILLA_WORD = os.path.join(BASE_DIR, archivos_word[0]) if archivos_word else None
+# Cargar archivos por defecto si existen
+EXCEL_HISTORIAL = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx") if os.path.exists(os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")) else obtener_archivo_existente(('.xlsx', '.xls'))
+PLANTILLA_WORD = obtener_archivo_existente(('.docx',))
+MAESTRO_CARGOS = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else obtener_archivo_existente(('.pdf',), prefijo="MAESTRO")
 
-archivos_pdf_maestro = [f for f in os.listdir(BASE_DIR) if "MAESTRO" in f.upper() and f.lower().endswith('.pdf')]
-MAESTRO_CARGOS = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else (os.path.join(BASE_DIR, archivos_pdf_maestro[0]) if archivos_pdf_maestro else None)
-
+# Días festivos oficiales
 FESTIVOS_COLOMBIA = [
     datetime.date(2026, 1, 1),   datetime.date(2026, 1, 12),  datetime.date(2026, 3, 23),
     datetime.date(2026, 4, 2),   datetime.date(2026, 4, 3),   datetime.date(2026, 5, 1),
@@ -57,13 +66,11 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
 
     texto_unificado = " ".join(texto.split())
 
-    # Radicado
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", texto_unificado)
     if not rad_match and filename_pdf:
         rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", filename_pdf)
     radicado = rad_match.group(1).strip() if rad_match else ""
 
-    # Fecha Radicado
     fecha_rad_str = ""
     match_fecha_txt = re.search(r"(\d{1,2})\s+de\s+([a-zA-Z]+)\s+de\s+(\d{4})", texto_unificado, re.IGNORECASE)
     if match_fecha_txt:
@@ -73,17 +80,14 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
         if sticker_match:
             fecha_rad_str = f"{int(sticker_match.group(1)):02d} de {meses_dict.get(int(sticker_match.group(2)), 'junio')} de {sticker_match.group(3)}"
 
-    # Cédulas
     todas_cedulas = re.findall(r"(\d{7,10})", texto_unificado)
 
-    # Período Causado
     p_inicio, p_fin = "", ""
     periodo_match = re.search(r"(?:comprendido\s+entre\s+el|periodo\s+del|periodo\s+causado\s+del)\s+(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})\s+(?:al|hasta\s+el|y\s+el)\s+(\d{1,2}\s+de\s+[a-zA-Z]+\s+de\s+\d{4})", texto_unificado, re.IGNORECASE)
     if periodo_match:
         p_inicio = periodo_match.group(1).strip()
         p_fin = periodo_match.group(2).strip()
 
-    # Fecha Disfrute
     disfrute_match = re.search(r"a\s+partir\s+del\s+(\d{1,2}\s+de\s+[a-zA-Z]+(?:\s+de\s+\d{4})?)", texto_unificado, re.IGNORECASE)
     fecha_disfrute_obj = datetime.date.today()
     if disfrute_match:
@@ -120,12 +124,37 @@ def reemplazar_respetando_formato(doc, dic_reemplazos):
                 for p in celda.paragraphs:
                     procesar_p(p)
 
-# --- INTERFAZ STREAMLIT ---
+# --- BARRA LATERAL DE ADMINISTRACIÓN ---
+with st.sidebar:
+    st.header("⚙️ Configuración y Bases de Datos")
+    
+    st.subheader("1. Excel de KactuS / Vacaciones")
+    uploaded_excel = st.file_uploader("Actualizar Excel Kactus (.xlsx)", type=["xlsx", "xls"], key="excel_uploader")
+    if uploaded_excel:
+        path_tmp = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")
+        with open(path_tmp, "wb") as f:
+            f.write(uploaded_excel.getbuffer())
+        EXCEL_HISTORIAL = path_tmp
+        st.success("✅ Base KactuS actualizada.")
+
+    st.subheader("2. Maestro de Cargos (PDF)")
+    uploaded_maestro = st.file_uploader("Actualizar PDF Maestro (.pdf)", type=["pdf"], key="maestro_uploader")
+    if uploaded_maestro:
+        path_tmp_m = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")
+        with open(path_tmp_m, "wb") as f:
+            f.write(uploaded_maestro.getbuffer())
+        MAESTRO_CARGOS = path_tmp_m
+        st.success("✅ Maestro de Cargos actualizado.")
+
+    st.markdown("---")
+    st.info(f"**Plantilla Word:** {'Detectada' if PLANTILLA_WORD else 'No encontrada'}\n\n**Base Kactus:** {'Cargada' if EXCEL_HISTORIAL else 'No encontrada'}")
+
+# --- CONTENIDO PRINCIPAL ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
 st.markdown("Carga la carta de solicitud enviada por el funcionario (PDF) para generar la resolución oficial en Word.")
 
 if not EXCEL_HISTORIAL or not PLANTILLA_WORD:
-    st.error("⚠️ Falta cargar la plantilla Word o la base Excel en la carpeta del repositorio.")
+    st.warning("⚠️ Asegúrate de tener cargada la base Excel de KactuS y la plantilla de Word en la barra lateral.")
 else:
     archivo_pdf = st.file_uploader("Arrastra aquí la carta de solicitud recibida (.pdf)", type=["pdf"], key="pdf_uploader")
 
@@ -152,22 +181,23 @@ else:
                     break
 
         st.success("📄 Carta analizada correctamente.")
-        st.markdown("### 👤 Confirmación del Solicitante:")
         
-        solicitante_elegido = st.selectbox(
-            "Verifica o selecciona el funcionario que solicita las vacaciones:",
-            options=lista_funcionarios,
-            index=indice_sugerido
-        )
+        col_func, col_datos = st.columns([1, 1])
+        with col_func:
+            st.markdown("### 👤 Confirmación del Solicitante:")
+            solicitante_elegido = st.selectbox(
+                "Verifica o selecciona el funcionario:",
+                options=lista_funcionarios,
+                index=indice_sugerido
+            )
 
         fila_encontrada = df_kactus[df_kactus['Nombre_Completo'] == solicitante_elegido].iloc[0]
-        
         cedula_num = int(fila_encontrada['Identificación'])
         cedula_puntos = f"{cedula_num:,}".replace(",", ".")
         nombre_completo = solicitante_elegido
 
         st.markdown("---")
-        st.markdown("### 📅 Ajusta o confirma las fechas e información extraída de la carta:")
+        st.markdown("### 📅 Ajusta o confirma las fechas e información extraída:")
         col1, col2 = st.columns(2)
         with col1:
             radicado_final = st.text_input("Número de Radicado:", value=datos_carta['radicado'])
@@ -179,7 +209,7 @@ else:
 
         st.markdown("---")
 
-        if st.button("⚡ Generar Resolución en Word"):
+        if st.button("⚡ Generar Resolución en Word", type="primary"):
             genero = str(fila_encontrada.get('Sexo', '')).upper()
             if 'F' in genero or nombre_completo.startswith(('BLANCA', 'MARIA', 'ANGELA', 'NEILA', 'NIDIA', 'YADIRA', 'KATHERINE', 'SANDRA', 'PATRICIA', 'LILIANA', 'CLAUDIA', 'SONIA', 'ROSA', 'ANA', 'CONSUELO', 'NORA', 'IRMA')):
                 texto_funcionario = "la funcionaria"
@@ -208,7 +238,7 @@ else:
                 "[TEXTO_FUNCIONARIO_A]": texto_funcionario_a,
                 "[NOMBRE_EMPLEADO]": nombre_completo,
                 "[CEDULA]": cedula_puntos,
-                "[CARGO]": "Profesional G04",
+                "[CARGO]": str(fila_encontrada.get('Cargo', 'Profesional G04')),
                 "[CENTRO_FORMACION]": "Centro Industrial de Mantenimiento y Manufactura de la regional Boyacá",
                 "[RADICADO]": radicado_final,
                 "[FECHA_RADICADO]": fecha_rad_final,
