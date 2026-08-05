@@ -26,7 +26,6 @@ def obtener_archivo_existente(extensiones, prefijo=""):
                 return os.path.join(BASE_DIR, f)
     return None
 
-# Intentar precargar archivos si existen localmente
 file_excel_local = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx") if os.path.exists(os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")) else obtener_archivo_existente(('.xlsx', '.xls'))
 file_maestro_local = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf") if os.path.exists(os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")) else obtener_archivo_existente(('.pdf',), prefijo="MAESTRO")
 file_word_local = obtener_archivo_existente(('.docx',))
@@ -63,45 +62,59 @@ def extraer_datos_pdf(file_bytes, filename_pdf=""):
 
     texto_unificado = " ".join(texto.split())
 
-    # Radicado
+    # 1. RADICADO
     rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", texto_unificado)
     if not rad_match and filename_pdf:
         rad_match = re.search(r"(\d{2}\-\d{1,2}\-\d{4}\-\d{4,8})", filename_pdf)
     radicado = rad_match.group(1).strip() if rad_match else ""
 
-    # Fecha del Radicado
+    # 2. FECHA DE RADICACIÓN (Extraer la fecha pegada al sticker de radicación)
     fecha_rad_str = ""
-    match_fecha_txt = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
-    if match_fecha_txt:
-        fecha_rad_str = f"{int(match_fecha_txt.group(1)):02d} de {meses_dict.get(int(match_fecha_txt.group(2)), 'julio')} de {match_fecha_txt.group(3)}"
+    if radicado:
+        # Busca fecha de tipo d/m/yyyy inmediatamente cerca del radicado
+        sticker_match = re.search(r"(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})", texto_unificado)
+        if sticker_match:
+            d_rad = int(sticker_match.group(1))
+            m_rad = int(sticker_match.group(2))
+            a_rad = sticker_match.group(3)
+            fecha_rad_str = f"{d_rad:02d} de {meses_dict.get(m_rad, 'julio')} de {a_rad}"
 
-    # Cédula del solicitante (buscando patrones en la firma/cuerpo)
+    if not fecha_rad_str:
+        # Fallback a la fecha del encabezado (Ej: "Sogamoso, 28 Julio 2026")
+        encabezado_match = re.search(r"(?:Sogamoso|Tunja|Duitama)?\s*,?\s*(\d{1,2})\s+(?:de\s+)?([a-zA-Z]+)\s+(?:de\s+)?(\d{4})", texto_unificado, re.IGNORECASE)
+        if encabezado_match:
+            d_enc = int(encabezado_match.group(1))
+            m_enc = encabezado_match.group(2).lower()
+            a_enc = encabezado_match.group(3)
+            fecha_rad_str = f"{d_enc:02d} de {m_enc} de {a_enc}"
+
+    # 3. CÉDULA DEL SOLICITANTE
     cedula_solicitante = ""
     ced_match = re.search(r"(?:Cedula|C\.C\.|Cédula)\s*(?:NO\.|No\.)?\s*([\d\.]+)", texto_unificado, re.IGNORECASE)
     if ced_match:
         cedula_solicitante = ced_match.group(1).replace(".", "").strip()
 
-    # Periodos causados (Ej: 2024 - 2025)
+    # 4. PERIODOS CAUSADOS (Ej: vigencia 2024 al 2025 -> 16 de enero de 2024 al 15 de enero de 2025)
     p_inicio, p_fin = "", ""
     periodo_match = re.search(r"periodo\s+(?:comprendido\s+vigencia\s+)?(\d{4})\s*(?:a|al|\-)\s*(\d{4})", texto_unificado, re.IGNORECASE)
     if periodo_match:
-        p_inicio = f"01 de enero de {periodo_match.group(1)}"
-        p_fin = f"31 de diciembre de {periodo_match.group(2)}"
+        p_inicio = f"16 de enero de {periodo_match.group(1)}"
+        p_fin = f"15 de enero de {periodo_match.group(2)}"
 
-    # Fecha Inicio Disfrute (Ej: ENTRE 7 DE SEPTIEMBRE Y 25 SEPTIEMBRE 2026)
+    # 5. FECHA DE INICIO DE DISFRUTE
     fecha_disfrute_obj = datetime.date(2026, 9, 7)
-    disfrute_match = re.search(r"(?:entre|a partir del)\s+(\d{1,2})\s+de\s+([a-zA-Z]+)(?:\s+de\s+(\d{4}))?", texto_unificado, re.IGNORECASE)
+    disfrute_match = re.search(r"(?:entre|a partir del)\s+(\d{1,2})\s+DE\s+([a-zA-Z]+)(?:\s+Y\s+\d{1,2}\s+[a-zA-Z]+)?\s+(\d{4})", texto_unificado, re.IGNORECASE)
     if disfrute_match:
         dia = int(disfrute_match.group(1))
         mes_txt = disfrute_match.group(2).lower()
-        anio = int(disfrute_match.group(3)) if disfrute_match.group(3) else 2026
+        anio = int(disfrute_match.group(3))
         fecha_disfrute_obj = datetime.date(anio, meses_nom.get(mes_txt, 9), dia)
 
     return {
         "radicado": radicado,
         "fecha_radicado": fecha_rad_str if fecha_rad_str else "29 de julio de 2026",
-        "periodo_inicio": p_inicio if p_inicio else "2024",
-        "periodo_fin": p_fin if p_fin else "2025",
+        "periodo_inicio": p_inicio if p_inicio else "16 de enero de 2024",
+        "periodo_fin": p_fin if p_fin else "15 de enero de 2025",
         "fecha_inicio_obj": fecha_disfrute_obj,
         "cedula_solicitante": cedula_solicitante,
         "texto_completo": texto_unificado
@@ -126,11 +139,9 @@ def reemplazar_respetando_formato(doc, dic_reemplazos):
                 for p in celda.paragraphs:
                     procesar_p(p)
 
-# --- BARRA LATERAL (GESTIÓN DE BASES Y PLATAFORMA) ---
+# --- BARRA LATERAL ---
 with st.sidebar:
     st.header("⚙️ Configuración y Bases de Datos")
-    
-    st.subheader("1. Base de Datos KactuS (.xlsx)")
     up_excel = st.file_uploader("Actualizar Excel Kactus", type=["xlsx", "xls"], key="up_excel")
     if up_excel:
         path_tmp_e = os.path.join(BASE_DIR, "Kactus_Actualizado.xlsx")
@@ -139,7 +150,6 @@ with st.sidebar:
         file_excel_local = path_tmp_e
         st.success("✅ Excel KactuS cargado.")
 
-    st.subheader("2. Maestro de Cargos PDF")
     up_maestro = st.file_uploader("Actualizar Maestro por Dependencias (.pdf)", type=["pdf"], key="up_maestro")
     if up_maestro:
         path_tmp_m = os.path.join(BASE_DIR, "MAESTRO_CARGOS_ACTUALIZADO.pdf")
@@ -148,7 +158,6 @@ with st.sidebar:
         file_maestro_local = path_tmp_m
         st.success("✅ Maestro de Cargos cargado.")
 
-    st.subheader("3. Plantilla Oficial Word (.docx)")
     up_word = st.file_uploader("Actualizar Plantilla Word", type=["docx"], key="up_word")
     if up_word:
         path_tmp_w = os.path.join(BASE_DIR, "Plantilla_Resolucion.docx")
@@ -157,15 +166,8 @@ with st.sidebar:
         file_word_local = path_tmp_w
         st.success("✅ Plantilla Word cargada.")
 
-    st.markdown("---")
-    st.markdown("### 📊 Estado actual:")
-    st.write(f"• **Kactus Excel:** {'✅ Activo' if file_excel_local else '❌ Pendiente'}")
-    st.write(f"• **Maestro Cargos:** {'✅ Activo' if file_maestro_local else '❌ Pendiente'}")
-    st.write(f"• **Plantilla Word:** {'✅ Activo' if file_word_local else '❌ Pendiente'}")
-
 # --- CONTENIDO PRINCIPAL ---
 st.title("🏛️ Sistema Automático de Resoluciones de Vacaciones")
-st.markdown("Carga la carta de solicitud enviada por el funcionario (PDF) para generar la resolución oficial en Word.")
 
 if not file_excel_local or not file_word_local:
     st.warning("⚠️ Debes subir el **Excel de KactuS** y la **Plantilla Word** en la barra lateral antes de continuar.")
@@ -185,7 +187,6 @@ else:
         
         lista_funcionarios = sorted([n for n in df_kactus['Nombre_Completo'].unique() if len(n) > 2])
 
-        # Búsqueda precisa de Consuelo Milena o por Cédula (46.672.632)
         indice_sugerido = 0
         if datos_carta['cedula_solicitante']:
             filas_c = df_kactus[df_kactus['Identificación'].astype(str).str.contains(datos_carta['cedula_solicitante'])]
@@ -193,13 +194,6 @@ else:
                 nom_c = filas_c.iloc[0]['Nombre_Completo']
                 if nom_c in lista_funcionarios:
                     indice_sugerido = lista_funcionarios.index(nom_c)
-        else:
-            # Buscar por nombre en el texto completo de la carta
-            for i, nom in enumerate(lista_funcionarios):
-                partes_nom = nom.split()
-                if len(partes_nom) >= 2 and partes_nom[0] in datos_carta['texto_completo'] and partes_nom[1] in datos_carta['texto_completo']:
-                    indice_sugerido = i
-                    break
 
         st.success("📄 Carta analizada correctamente.")
         
@@ -249,12 +243,12 @@ else:
             fecha_inicio_formateada = f"{dia_ini_str} de {meses_esp[f_ini_obj_final.month - 1]} de {f_ini_obj_final.year}"
 
             hoy = datetime.date.today()
-            fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {fecha_hoy_str if 'fecha_hoy_str' in locals() else hoy.year}"
+            fecha_hoy_str = f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}"
 
             doc = Document(file_word_local)
             
             reemplazos = {
-                "[TITULO_DIRECTOR_COMPLETO]": "DIRECTOR REGIONAL DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\" REGIONAL BOYACÁ",
+                "[TITULO_DIRECTOR_COMPLETO]": "DIRECTORA (E) DE LA REGIONAL BOYACÁ DEL SERVICIO NACIONAL DE APRENDIZAJE \"SENA\"",
                 "[TEXTO_FUNCIONARIO]": texto_funcionario,
                 "[TEXTO_FUNCIONARIO_A]": texto_funcionario_a,
                 "[NOMBRE_EMPLEADO]": nombre_completo,
@@ -268,9 +262,9 @@ else:
                 "[PERIODO_INICIO]": p_ini_final,
                 "[PERIODO_FIN]": p_fin_final,
                 "[CIUDAD_CENTRO]": "Sogamoso",
-                "[FECHA_HOY]": f"{hoy.day:02d} de {meses_esp[hoy.month - 1]} de {hoy.year}",
-                "[NOMBRE_JEFE_FIRMA]": "Director Regional",
-                "[CARGO_JEFE_FIRMA]": "Director Regional Boyacá"
+                "[FECHA_HOY]": fecha_hoy_str,
+                "[NOMBRE_JEFE_FIRMA]": "ENITH YADIRA RAMÍREZ CAMARGO",
+                "[CARGO_JEFE_FIRMA]": "Directora (E) Regional Boyacá"
             }
             
             reemplazar_respetando_formato(doc, reemplazos)
@@ -281,7 +275,7 @@ else:
             doc.save(salida_path)
 
             st.balloons()
-            st.success(f"✅ ¡Resolución generada exitosamente para {nombre_completo}!")
+            st.success(f"✅ ¡Resolución generada para {nombre_completo}!")
 
             with open(salida_path, "rb") as file_docx:
                 st.download_button(
